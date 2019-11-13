@@ -69,21 +69,21 @@ static const ValueFlow::Value *getBufferSizeValue(const Token *tok)
     return it == tokenValues.end() ? nullptr : &*it;
 }
 
-static size_t getMinFormatStringOutputLength(const std::vector<const Token*> &parameters, unsigned int formatStringArgNr)
+static int getMinFormatStringOutputLength(const std::vector<const Token*> &parameters, nonneg int formatStringArgNr)
 {
-    if (formatStringArgNr == 0 || formatStringArgNr > parameters.size())
+    if (formatStringArgNr <= 0 || formatStringArgNr > parameters.size())
         return 0;
     if (parameters[formatStringArgNr - 1]->tokType() != Token::eString)
         return 0;
     const std::string &formatString = parameters[formatStringArgNr - 1]->str();
     bool percentCharFound = false;
-    std::size_t outputStringSize = 0;
+    int outputStringSize = 0;
     bool handleNextParameter = false;
     std::string digits_string;
     bool i_d_x_f_found = false;
-    std::size_t parameterLength = 0;
-    unsigned int inputArgNr = formatStringArgNr;
-    for (std::string::size_type i = 1; i + 1 < formatString.length(); ++i) {
+    int parameterLength = 0;
+    int inputArgNr = formatStringArgNr;
+    for (int i = 1; i + 1 < formatString.length(); ++i) {
         if (formatString[i] == '\\') {
             if (i < formatString.length() - 1 && formatString[i + 1] == '0')
                 break;
@@ -142,13 +142,13 @@ static size_t getMinFormatStringOutputLength(const std::vector<const Token*> &pa
             outputStringSize++;
 
         if (handleNextParameter) {
-            unsigned int tempDigits = static_cast<unsigned int>(std::abs(std::atoi(digits_string.c_str())));
+            int tempDigits = std::abs(std::atoi(digits_string.c_str()));
             if (i_d_x_f_found)
-                tempDigits = std::max(static_cast<unsigned int>(tempDigits), 1U);
+                tempDigits = std::max(tempDigits, 1);
 
             if (digits_string.find('.') != std::string::npos) {
                 const std::string endStr = digits_string.substr(digits_string.find('.') + 1);
-                const unsigned int maxLen = std::max(static_cast<unsigned int>(std::abs(std::atoi(endStr.c_str()))), 1U);
+                const int maxLen = std::max(std::abs(std::atoi(endStr.c_str())), 1);
 
                 if (formatString[i] == 's') {
                     // For strings, the length after the dot "%.2s" will limit
@@ -188,10 +188,7 @@ static bool getDimensionsEtc(const Token * const arrayToken, const Settings *set
     while (Token::Match(array, ".|::"))
         array = array->astOperand2();
 
-    if (!array->variable())
-        return false;
-
-    if (array->variable()->isArray() && !array->variable()->dimensions().empty()) {
+    if (array->variable() && array->variable()->isArray() && !array->variable()->dimensions().empty()) {
         *dimensions = array->variable()->dimensions();
         if (dimensions->size() >= 1 && ((*dimensions)[0].num <= 1 || !(*dimensions)[0].tok)) {
             visitAstNodes(arrayToken,
@@ -203,10 +200,10 @@ static bool getDimensionsEtc(const Token * const arrayToken, const Settings *set
                 return ChildrenToVisit::op1_and_op2;
             });
         }
-    } else if (const Token *stringLiteral = array->getValueTokenMinStrSize()) {
+    } else if (const Token *stringLiteral = array->getValueTokenMinStrSize(settings)) {
         Dimension dim;
         dim.tok = nullptr;
-        dim.num = Token::getStrSize(stringLiteral);
+        dim.num = Token::getStrArraySize(stringLiteral);
         dim.known = array->hasKnownValue();
         dimensions->emplace_back(dim);
     } else if (array->valueType() && array->valueType()->pointer >= 1 && array->valueType()->isIntegral()) {
@@ -234,7 +231,7 @@ static std::vector<const ValueFlow::Value *> getOverrunIndexValues(const Token *
         bool overflow = false;
         bool allKnown = true;
         std::vector<const ValueFlow::Value *> indexValues;
-        for (size_t i = 0; i < dimensions.size() && i < indexTokens.size(); ++i) {
+        for (int i = 0; i < dimensions.size() && i < indexTokens.size(); ++i) {
             const ValueFlow::Value *value = indexTokens[i]->getMaxValue(cond == 1);
             indexValues.push_back(value);
             if (!value)
@@ -244,7 +241,7 @@ static std::vector<const ValueFlow::Value *> getOverrunIndexValues(const Token *
                     continue;
                 allKnown = false;
             }
-            if (array->variable()->isArray() && dimensions[i].num == 0)
+            if (array->variable() && array->variable()->isArray() && dimensions[i].num == 0)
                 continue;
             if (value->intvalue == dimensions[i].num)
                 equal = true;
@@ -275,7 +272,7 @@ void CheckBufferOverrun::arrayIndex()
         const Token *array = tok->astOperand1();
         while (Token::Match(array, ".|::"))
             array = array->astOperand2();
-        if (!array|| !array->variable() || array->variable()->nameToken() == array)
+        if (!array || ((!array->variable() || array->variable()->nameToken() == array) && array->tokType() != Token::eString))
             continue;
         if (!array->scope()->isExecutable()) {
             // LHS in non-executable scope => This is just a definition
@@ -285,6 +282,9 @@ void CheckBufferOverrun::arrayIndex()
             if (!parent || parent == parent->astParent()->astOperand1())
                 continue;
         }
+
+        if (astIsContainer(array))
+            continue;
 
         std::vector<const Token *> indexTokens;
         for (const Token *tok2 = tok; tok2 && tok2->str() == "["; tok2 = tok2->link()->next()) {
@@ -313,8 +313,8 @@ void CheckBufferOverrun::arrayIndex()
         // Negative index
         bool neg = false;
         std::vector<const ValueFlow::Value *> negativeIndexes;
-        for (size_t i = 0; i < indexTokens.size(); ++i) {
-            const ValueFlow::Value *negativeValue = indexTokens[i]->getValueLE(-1, mSettings);
+        for (const Token * indexToken : indexTokens) {
+            const ValueFlow::Value *negativeValue = indexToken->getValueLE(-1, mSettings);
             negativeIndexes.emplace_back(negativeValue);
             if (negativeValue)
                 neg = true;
@@ -574,7 +574,7 @@ void CheckBufferOverrun::bufferOverflow()
             if (!mSettings->library.hasminsize(tok))
                 continue;
             const std::vector<const Token *> args = getArguments(tok);
-            for (unsigned int argnr = 0; argnr < args.size(); ++argnr) {
+            for (int argnr = 0; argnr < args.size(); ++argnr) {
                 if (!args[argnr]->valueType() || args[argnr]->valueType()->pointer == 0)
                     continue;
                 const std::vector<Library::ArgumentChecks::MinSize> *minsizes = mSettings->library.argminsizes(tok, argnr + 1);
@@ -587,6 +587,8 @@ void CheckBufferOverrun::bufferOverflow()
                 while (Token::Match(argtok, ".|::"))
                     argtok = argtok->astOperand2();
                 if (!argtok || !argtok->variable())
+                    continue;
+                if (argtok->valueType() && argtok->valueType()->pointer == 0)
                     continue;
                 // TODO: strcpy(buf+10, "hello");
                 const ValueFlow::Value bufferSize = getBufferSize(argtok);
@@ -625,7 +627,7 @@ void CheckBufferOverrun::arrayIndexThenCheck()
             if (Token::Match(tok, "%name% [ %var% ]")) {
                 tok = tok->next();
 
-                const unsigned int indexID = tok->next()->varId();
+                const int indexID = tok->next()->varId();
                 const std::string& indexName(tok->strAt(1));
 
                 // Iterate AST upwards
@@ -894,7 +896,7 @@ void CheckBufferOverrun::objectIndex()
             ValueFlow::Value v = getLifetimeObjValue(obj);
             if (!v.isLocalLifetimeValue())
                 continue;
-            if (v.lifetimeKind != ValueFlow::Value::Address)
+            if (v.lifetimeKind != ValueFlow::Value::LifetimeKind::Address)
                 continue;
             const Variable *var = v.tokvalue->variable();
             if (var->isReference())

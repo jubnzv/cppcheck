@@ -6,9 +6,10 @@ This is a Python module that helps you access Cppcheck dump data.
 License: No restrictions, use this as you need.
 """
 
-import xml.etree.ElementTree as ET
+from xml.etree import ElementTree
 import argparse
 from fnmatch import fnmatch
+import json
 import sys
 
 
@@ -33,7 +34,7 @@ class Directive:
     str = None
     file = None
     linenr = None
-    col = 0
+    column = 0
 
     def __init__(self, element):
         self.str = element.get('str')
@@ -87,7 +88,6 @@ class ValueType:
         return self.typeScope and self.typeScope.type == "Enum"
 
 
-
 class Token:
     """
     Token class. Contains information about each token in the source code.
@@ -118,6 +118,7 @@ class Token:
         isLogicalOp        Is this token a logical operator: && ||
         isUnsigned         Is this token a unsigned type
         isSigned           Is this token a signed type
+        isExpandedMacro    Is this token a expanded macro token
         varId              varId for token, each variable has a unique non-zero id
         variable           Variable information for this token. See the Variable class.
         function           If this token points at a function call, this attribute has the Function
@@ -130,7 +131,7 @@ class Token:
         astOperand2        ast operand2
         file               file name
         linenr             line number
-        col                column
+        column             column
 
     To iterate through all tokens use such code:
     @code
@@ -165,6 +166,7 @@ class Token:
     isLogicalOp = False
     isUnsigned = False
     isSigned = False
+    isExpandedMacro = False
     varId = None
     variableId = None
     variable = None
@@ -186,7 +188,7 @@ class Token:
 
     file = None
     linenr = None
-    col = None
+    column = None
 
     def __init__(self, element):
         self.Id = element.get('id')
@@ -223,6 +225,8 @@ class Token:
                 self.isComparisonOp = True
             elif element.get('isLogicalOp'):
                 self.isLogicalOp = True
+        if element.get('isExpandedMacro'):
+            self.isExpandedMacro = True
         self.linkId = element.get('link')
         self.link = None
         if element.get('varId'):
@@ -247,7 +251,7 @@ class Token:
         self.astOperand2 = None
         self.file = element.get('file')
         self.linenr = int(element.get('linenr'))
-        self.col = int(element.get('col'))
+        self.column = int(element.get('column'))
 
     def setId(self, IdMap):
         self.scope = IdMap[self.scopeId]
@@ -287,6 +291,8 @@ class Scope:
         className      Name of this scope.
                        For a function scope, this is the function name;
                        For a class scope, this is the class name.
+        function       If this scope belongs at a function call, this attribute
+                       has the Function information. See the Function class.
         type           Type of scope: Global, Function, Class, If, While
     """
 
@@ -296,6 +302,8 @@ class Scope:
     bodyEndId = None
     bodyEnd = None
     className = None
+    functionId = None
+    function = None
     nestedInId = None
     nestedIn = None
     type = None
@@ -304,6 +312,8 @@ class Scope:
     def __init__(self, element):
         self.Id = element.get('id')
         self.className = element.get('className')
+        self.functionId = element.get('function')
+        self.function = None
         self.bodyStartId = element.get('bodyStart')
         self.bodyStart = None
         self.bodyEndId = element.get('bodyEnd')
@@ -311,12 +321,14 @@ class Scope:
         self.nestedInId = element.get('nestedIn')
         self.nestedIn = None
         self.type = element.get('type')
-        self.isExecutable = (self.type in ('Function', 'If', 'Else', 'For', 'While', 'Do', 'Switch', 'Try', 'Catch', 'Unconditional', 'Lambda'))
+        self.isExecutable = (self.type in ('Function', 'If', 'Else', 'For', 'While', 'Do',
+                                           'Switch', 'Try', 'Catch', 'Unconditional', 'Lambda'))
 
     def setId(self, IdMap):
         self.bodyStart = IdMap[self.bodyStartId]
         self.bodyEnd = IdMap[self.bodyEndId]
         self.nestedIn = IdMap[self.nestedInId]
+        self.function = IdMap[self.functionId]
 
 
 class Function:
@@ -324,6 +336,13 @@ class Function:
     Information about a function
     C++ class:
     http://cppcheck.net/devinfo/doxyoutput/classFunction.html
+
+    Attributes
+        argument                Argument list
+        tokenDef                Token in function definition
+        isVirtual               Is this function is virtual
+        isImplicitlyVirtual     Is this function is virtual this in the base classes
+        isStatic                Is this function is static
     """
 
     Id = None
@@ -335,6 +354,7 @@ class Function:
     type = None
     isVirtual = None
     isImplicitlyVirtual = None
+    isStatic = None
 
     def __init__(self, element):
         self.Id = element.get('id')
@@ -345,6 +365,8 @@ class Function:
         self.isVirtual = (isVirtual and isVirtual == 'true')
         isImplicitlyVirtual = element.get('isImplicitlyVirtual')
         self.isImplicitlyVirtual = (isImplicitlyVirtual and isImplicitlyVirtual == 'true')
+        isStatic = element.get('isStatic')
+        self.isStatic = (isStatic and isStatic == 'true')
 
         self.argument = {}
         self.argumentId = {}
@@ -490,17 +512,18 @@ class ValueFlow:
             if self.condition:
                 self.condition = int(self.condition)
             if element.get('known'):
-                valueKind = 'known'
+                self.valueKind = 'known'
             elif element.get('possible'):
-                valueKind = 'possible'
+                self.valueKind = 'possible'
             if element.get('inconclusive'):
-                inconclusive = 'known'
+                self.inconclusive = True
 
     def __init__(self, element):
         self.Id = element.get('id')
         self.values = []
         for value in element:
             self.values.append(ValueFlow.Value(value))
+
 
 class Suppression:
     """
@@ -527,12 +550,13 @@ class Suppression:
 
     def isMatch(self, file, line, message, errorId):
         if ((self.fileName is None or fnmatch(file, self.fileName))
-            and (self.lineNumber is None or line == self.lineNumber)
-            and (self.symbolName is None or fnmatch(message, '*'+self.symbolName+'*'))
-            and fnmatch(errorId, self.errorId)):
+                and (self.lineNumber is None or line == self.lineNumber)
+                and (self.symbolName is None or fnmatch(message, '*'+self.symbolName+'*'))
+                and fnmatch(errorId, self.errorId)):
             return True
         else:
             return False
+
 
 class Configuration:
     """
@@ -663,6 +687,7 @@ class Platform:
         self.long_long_bit = int(platformnode.get('long_long_bit'))
         self.pointer_bit = int(platformnode.get('pointer_bit'))
 
+
 class Standards:
     """
     Standards class
@@ -677,7 +702,8 @@ class Standards:
     def __init__(self, standardsnode):
         self.c = standardsnode.find("c").get("version")
         self.cpp = standardsnode.find("cpp").get("version")
-        self.posix = standardsnode.find("posix") != None
+        self.posix = standardsnode.find("posix") is not None
+
 
 class CppcheckData:
     """
@@ -723,7 +749,7 @@ class CppcheckData:
     def __init__(self, filename):
         self.configurations = []
 
-        data = ET.parse(filename)
+        data = ElementTree.parse(filename)
 
         for platformNode in data.getroot():
             if platformNode.tag == 'platform':
@@ -744,17 +770,34 @@ class CppcheckData:
                 self.rawTokens[i + 1].previous = self.rawTokens[i]
                 self.rawTokens[i].next = self.rawTokens[i + 1]
 
-
         for suppressionsNode in data.getroot():
             if suppressionsNode.tag == "suppressions":
                 for suppression in suppressionsNode:
                     self.suppressions.append(Suppression(suppression))
 
-
         # root is 'dumps' node, each config has its own 'dump' subnode.
         for cfgnode in data.getroot():
             if cfgnode.tag == 'dump':
                 self.configurations.append(Configuration(cfgnode))
+
+
+# Get function arguments
+def getArgumentsRecursive(tok, arguments):
+    if tok is None:
+        return
+    if tok.str == ',':
+        getArgumentsRecursive(tok.astOperand1, arguments)
+        getArgumentsRecursive(tok.astOperand2, arguments)
+    else:
+        arguments.append(tok)
+
+
+def getArguments(ftok):
+    if (not ftok.isName) or (ftok.next is None) or ftok.next.str != '(':
+        return None
+    args = []
+    getArgumentsRecursive(ftok.next.astOperand2, args)
+    return args
 
 
 def parsedump(filename):
@@ -828,11 +871,19 @@ def simpleMatch(token, pattern):
     return True
 
 
-def reportError(location, severity, message, addon, errorId):
+def reportError(location, severity, message, addon, errorId, extra=''):
     if '--cli' in sys.argv:
-        errout = sys.stdout
-        loc = '[%s:%i:%i]' % (location.file, location.linenr, location.col)
+        msg = { 'file': location.file,
+                'linenr': location.linenr,
+                'column': location.column,
+                'severity': severity,
+                'message': message,
+                'addon': addon,
+                'errorId': errorId,
+                'extra': extra}
+        sys.stdout.write(json.dumps(msg) + '\n')
     else:
-        errout = sys.stderr
         loc = '[%s:%i]' % (location.file, location.linenr)
-    errout.write('%s (%s) %s [%s-%s]\n' % (loc, severity, message, addon, errorId))
+        if len(extra) > 0:
+            message += ' (' + extra + ')'
+        sys.stderr.write('%s (%s) %s [%s-%s]\n' % (loc, severity, message, addon, errorId))

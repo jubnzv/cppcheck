@@ -1118,12 +1118,44 @@ void CheckUnusedVar::checkFunctionVariableUsage()
                     tok = eq;
                 }
             }
-            // not assignment/initialization => continue
-            if ((!tok->isAssignmentOp() || !tok->astOperand1()) && !(Token::Match(tok, "%var% (") && tok->variable() && tok->variable()->nameToken() == tok))
+            // not assignment/initialization/increment => continue
+            const bool isAssignment = tok->isAssignmentOp() && tok->astOperand1();
+            const bool isInitialization = (Token::Match(tok, "%var% (") && tok->variable() && tok->variable()->nameToken() == tok);
+            const bool isIncrementOrDecrement = (tok->tokType() == Token::Type::eIncDecOp);
+            if (!isAssignment && !isInitialization && !isIncrementOrDecrement)
                 continue;
             if (tok->isName()) {
-                if (!tok->valueType() || !tok->valueType()->isIntegral())
-                    continue;
+                if (mTokenizer->isCPP()) {
+                    // do not check RAII/scope_lock objects
+                    if (!tok->valueType())
+                        continue;
+                    bool check = false;
+                    switch (tok->valueType()->type) {
+                    case ValueType::Type::UNKNOWN_TYPE:
+                    case ValueType::Type::NONSTD:
+                    case ValueType::Type::RECORD:
+                        check = tok->valueType()->typeScope && !tok->valueType()->typeScope->getDestructor();
+                        break;
+                    case ValueType::Type::CONTAINER:
+                    case ValueType::Type::ITERATOR:
+                    case ValueType::Type::VOID:
+                    case ValueType::Type::BOOL:
+                    case ValueType::Type::CHAR:
+                    case ValueType::Type::SHORT:
+                    case ValueType::Type::WCHAR_T:
+                    case ValueType::Type::INT:
+                    case ValueType::Type::LONG:
+                    case ValueType::Type::LONGLONG:
+                    case ValueType::Type::UNKNOWN_INT:
+                    case ValueType::Type::FLOAT:
+                    case ValueType::Type::DOUBLE:
+                    case ValueType::Type::LONGDOUBLE:
+                        check = true;
+                        break;
+                    };
+                    if (!check)
+                        continue;
+                }
                 tok = tok->next();
             }
             if (tok->astParent() && tok->str() != "(") {
@@ -1139,15 +1171,29 @@ void CheckUnusedVar::checkFunctionVariableUsage()
             if (FwdAnalysis::isNullOperand(tok->astOperand2()))
                 continue;
 
-            if (tok->astOperand1()->variable() && tok->astOperand1()->variable()->isReference() && tok->astOperand1()->variable()->nameToken() != tok->astOperand1())
+            if (!tok->astOperand1())
+                continue;
+
+            const Token *iteratorToken = tok->astOperand1();
+            while (Token::Match(iteratorToken, "[.*]"))
+                iteratorToken = iteratorToken->astOperand1();
+            if (iteratorToken && iteratorToken->variable() && iteratorToken->variable()->typeEndToken()->str().find("iterator") != std::string::npos)
+                continue;
+
+            const Token *op1tok = tok->astOperand1();
+            while (Token::Match(op1tok, ".|[|*"))
+                op1tok = op1tok->astOperand1();
+
+            const Variable *op1Var = op1tok ? op1tok->variable() : nullptr;
+            if (op1Var && op1Var->isReference() && op1Var->nameToken() != tok->astOperand1())
                 // todo: check references
                 continue;
 
-            if (tok->astOperand1()->variable() && tok->astOperand1()->variable()->isStatic())
+            if (op1Var && op1Var->isStatic())
                 // todo: check static variables
                 continue;
 
-            if (tok->astOperand1()->variable() && tok->astOperand1()->variable()->nameToken()->isAttributeUnused())
+            if (op1Var && op1Var->nameToken()->isAttributeUnused())
                 continue;
 
             // Is there a redundant assignment?
@@ -1340,7 +1386,7 @@ bool CheckUnusedVar::isRecordTypeWithoutSideEffects(const Type* type)
         return withoutSideEffects;
 
     if (type && type->classScope && type->classScope->numConstructors == 0 &&
-        (type->classScope->varlist.empty() || type->needInitialization == Type::True)) {
+        (type->classScope->varlist.empty() || type->needInitialization == Type::NeedInitialization::True)) {
         for (std::vector<Type::BaseInfo>::const_iterator i = type->derivedFrom.begin(); i != type->derivedFrom.end(); ++i) {
             if (!isRecordTypeWithoutSideEffects(i->type)) {
                 withoutSideEffects=false;

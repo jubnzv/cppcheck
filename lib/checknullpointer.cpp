@@ -194,7 +194,7 @@ bool CheckNullPointer::isPointerDeRef(const Token *tok, bool &unknown, const Set
         return false;
 
     // read/write member variable
-    if (firstOperand && parent->str() == "." && (!parent->astParent() || parent->astParent()->str() != "&")) {
+    if (firstOperand && parent->originalName() == "->" && (!parent->astParent() || parent->astParent()->str() != "&")) {
         if (!parent->astParent() || parent->astParent()->str() != "(" || parent->astParent() == tok->previous())
             return true;
         unknown = true;
@@ -318,6 +318,22 @@ void CheckNullPointer::nullPointerLinkedList()
     }
 }
 
+static bool isNullablePointer(const Token* tok, const Settings* settings)
+{
+    if (!tok)
+        return false;
+    if (astIsPointer(tok))
+        return true;
+    if (astIsSmartPointer(tok))
+        return true;
+    if (Token::simpleMatch(tok, "."))
+        return isNullablePointer(tok->astOperand2(), settings);
+    if (const Variable* var = tok->variable()) {
+        return (var->isPointer() || var->isSmartPointer());
+    }
+    return false;
+}
+
 void CheckNullPointer::nullPointerByDeRefAndChec()
 {
     const bool printInconclusive = (mSettings->inconclusive);
@@ -328,11 +344,10 @@ void CheckNullPointer::nullPointerByDeRefAndChec()
             continue;
         }
 
-        const Variable *var = tok->variable();
-        if (!var || tok == var->nameToken())
+        if (Token::Match(tok, "%num%|%char%|%str%"))
             continue;
 
-        if (!var->isPointer() && !var->isSmartPointer())
+        if (!isNullablePointer(tok, mSettings))
             continue;
 
         // Can pointer be NULL?
@@ -347,11 +362,11 @@ void CheckNullPointer::nullPointerByDeRefAndChec()
         bool unknown = false;
         if (!isPointerDeRef(tok,unknown)) {
             if (unknown)
-                nullPointerError(tok, tok->str(), value, true);
+                nullPointerError(tok, tok->expressionString(), value, true);
             continue;
         }
 
-        nullPointerError(tok, tok->str(), value, value->isInconclusive());
+        nullPointerError(tok, tok->expressionString(), value, value->isInconclusive());
     }
 }
 

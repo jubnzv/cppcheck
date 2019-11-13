@@ -1,5 +1,5 @@
 // To test:
-// ~/cppcheck/cppcheck --dump misra-test.c && python ../misra.py -verify misra-test.c.dump
+// ~/cppcheck/cppcheck --dump misra-test.c && python ../../misra.py -verify misra-test.c.dump
 
 #include "path\file.h" // 20.2
 #include /*abc*/ "file.h" // no warning
@@ -11,6 +11,7 @@
 #include <wchar.h> //21.6
 #include <time.h> // 21.10
 #include <tgmath.h> // 21.11
+#include <fenv.h>
 
 
 typedef unsigned char      u8;
@@ -19,13 +20,35 @@ typedef unsigned int       u32;
 typedef signed int         s32;
 typedef unsigned long long u64;
 
-//   // 3.1
+/* // */   // 3.1
+/* /* */   // 3.1
 ////
+
+// http://example.com // no warning
+
+void misra_3_2(int enable)
+{
+    // This won't generate a violation because of subsequent blank line \
+	
+    int y = 0;
+    int x = 0;  // 3.2 non-compliant comment ends with backslash \
+    if (enable != 0)
+    {
+        ++x;    // This is always executed
+        // 3.2 potentially non-compliant comment ends with trigraph resolved to backslash ??/
+        ++y;    // This is hidden if trigraph replacement is active
+    }
+
+    (void)printf("x=%i, y=%i\n", x, y);
+}
 
 extern int misra_5_1_extern_var_hides_var_x;
 extern int misra_5_1_extern_var_hides_var_y; //5.1
 int misra_5_1_var_hides_var________a;
-int misra_5_1_var_hides_var________b; //5.1
+int misra_5_1_var_hides_var________b; int misra_5_1_var_hides_var________b1; int misra_5_1_var_hides_var________b2; //5.1
+int misra_5_1_var_hides_var________c; //5.1
+int misra_5_1_var_hides_var________d; //5.1
+int misra_5_1_var_hides_var________e; //5.1
 
 extern const uint8_t misra_5_2_var1;
 const uint8_t        misra_5_2_var1 = 3; // no warning
@@ -65,8 +88,45 @@ int misra_5_2_field_hides_field1_31y;//5.2
 };
 const char *s41_1 = "\x41g"; // 4.1
 const char *s41_2 = "\x41\x42";
+const char *s41_3 = "\x41" "\x42";
+const char *s41_4 = "\x41" "g";
+const char *s41_5 = "\x41\xA";
+const char *s41_6 = "\xA\x41";
+const char *s41_7 = "\xAA\xg\x41"; // 4.1
+const char *s41_8 = "\xAA\x\x41"; // 4.1
+const char *s41_9 = "unknown\gsequence";
+const char *s41_10 = "simple\nsequence";
+const char *s41_11 = "string";
 int c41_3         = '\141t'; // 4.1
 int c41_4         = '\141\t';
+int c41_5         = '\0';
+int c41_6         = '\0\t';
+int c41_7         = '\12\t';
+int c41_8         = '\0t';   // 4.1
+int c41_9         = '\12';
+int c41_10        = '\12\n';
+int c41_11        = '\12n';  // 4.1
+int c41_12         = '\12323'; // 4.1
+int c41_13         = '\123\3';
+int c41_14         = '\777\777';
+int c41_15         = 'a';
+
+void misra_4_1()
+{
+    (void)printf("\x41g"); // 4.1
+    (void)printf("\x41\x42");
+    (void)printf("\x41" "g");
+}
+
+const char *s42_1 = "String containing trigraphs ??-??-??";   // 4.2
+const char *s42_2 = "String containing trigraph???=preceded by question mark";   // 4.2
+const char *s42_3 = "No trigraph?(?'?)";
+
+void misra_4_2()
+{
+    (void)printf("??=Trigraph\n");   // 4.2
+    (void)printf("No?/Trigraph\n");
+}
 
 extern int misra_5_3_var_hides_var______31x;
 void misra_5_3_var_hides_function_31x (void) {}
@@ -101,6 +161,11 @@ void misra_5_3_enum_hidesfunction_31y(void) {} //5.3
 #define misra_5_4_macro_hides_macro__31y 2 //5.4
 #define m1(misra_5_4_param_hides_macro__31y) 1 //5.4
 #define m2(misra_5_4_param_hides_param__31x,misra_5_4_param_hides_param__31y) 1 //5.4
+#ifdef misra_5_4_macro_hides_macro__31x
+#define misra_5_4_macro 1 // no warning
+#else
+#define misra_5_4_macro 2 // no warning
+#endif
 
 #define misra_5_5_var_hides_macro____31x 1
 #define misra_5_5_functionhides_macro31x 1
@@ -150,6 +215,7 @@ enum misra_8_12_a { misra_a1 = 1, misra_a2 = 2, misra_a3, misra_a4 = 3 }; //8.12
 enum misra_8_12_b { misra_b1, misra_b2, misra_b3 = 3, misra_b4 = 3 }; // no-warning
 enum misra_8_12_c { misra_c1 = misra_a1, misra_c2 = 1 }; // no-warning
 enum misra_8_12_d { misra_d1 = 1, misra_d2 = 2, misra_d3 = misra_d1 }; // no-warning
+enum misra_8_12_e { misra_e1 = sizeof(int), misra_e2}; // no-crash
 
 void misra_8_14(char * restrict str) {} // 8.14
 
@@ -157,9 +223,10 @@ void misra_9_5() {
   int x[] = {[0]=23}; // 9.5
 }
 
-void misra_10_1() {
+void misra_10_1(uint8_t u) {
   int32_t i;
   i = 3 << 1; // 10.1
+  i = (u & u) << 4; // no-warning
 }
 
 void misra_10_4(u32 x, s32 y) {
@@ -221,8 +288,14 @@ void misra_11_7(int *p, float f) {
   y = ( int * ) f; //11.7
 }
 
+void misra_11_7_extra(int *p, float f, bool b) {
+  (void) p; // no-warning
+  (void) f; // no-warning
+}
+
+char * misra_11_8_const(const char *str) {  }
 char * misra_11_8(const char *str) {
-  (void)misra_11_8(str); // no-warning
+  (void)misra_11_8_const(str); // no-warning
   return (char *)str; // 11.8
 }
 
@@ -323,7 +396,7 @@ void misra_14_2() {
 struct {
   unsigned int x:1;
   unsigned int y:1;
-} _14_4_struct;
+} r14_4_struct;
 void misra_14_4(bool b) {
   if (x+4){} // 14.4
   else {}
@@ -331,7 +404,7 @@ void misra_14_4(bool b) {
   if (b) {}
   else {}
 
-  if (_14_4_struct.x) {}
+  if (r14_4_struct.x) {}
 }
 
 void misra_15_1() {
@@ -391,6 +464,9 @@ void misra_15_7() {
         var2 = 10u;
     }   // no-warning
   }
+
+  if (a==2) {} else if (b==4) {} // 15.7
+  if (a==2) {} else { if (b==4) {} } // no-warning
 }
 
 void misra_16_2() {
@@ -432,6 +508,62 @@ void misra_16_3() {
     case 12:
     default: break;
   }
+
+    switch (x) {
+    case 1:     // comment 1
+    {
+        a = 1;
+        break;
+    }
+    case 2:     // comment 2
+    {
+        a = 2;
+        break;
+    }
+    default:
+    {
+        break;
+    }
+  }
+
+  switch (x) {
+    case 1:
+        break;
+    default: // 16.5
+        x++;
+    case 19: // 16.3
+        break;
+    case 20:
+        x + 2;
+        x + 3;
+        break;
+    }
+    switch (x) { // 16.6
+    default:;
+    } // 16.3
+
+    switch (x) { default:; } // 16.3 16.6
+
+    switch (x) {
+    case 20:
+        x + 2;
+        x + 3;
+        break;
+    case 21:
+        x + 2;
+        x + 3;
+        break;
+    default:
+        ;
+    } // 16.3
+
+    switch (x) { // 16.4 16.6
+    case 1:
+        x++;
+        break;
+    case 2:
+        x++;
+  } // 16.3
 }
 
 void misra_16_4() {
@@ -492,6 +624,33 @@ void misra_17_1() {
   va_copy(); // 17.1
 }
 
+void misra_17_2_ok_1(void) { ; }
+void misra_17_2_ok_2(void) {
+    misra_17_2_ok_1(); // no-warning
+}
+void misra_17_2_1(void) {
+  misra_17_2_ok_1(); // no-warning
+  misra_17_2_1(); // 17.2
+  misra_17_2_ok_2(); // no-warning
+  misra_17_2_1(); // 17.2
+}
+void misra_17_2_2(void) {
+  misra_17_2_3(); // 17.2
+}
+void misra_17_2_3(void) {
+  misra_17_2_4(); // 17.2
+}
+void misra_17_2_4(void) {
+  misra_17_2_2(); // 17.2
+  misra_17_2_3(); // 17.2
+}
+
+void misra_17_2_5(void) {
+  misra_17_2_ok_1(); // no-warning
+  misra_17_2_5(); // 17.2
+  misra_17_2_1(); // no-warning
+}
+
 void misra_17_6(int x[static 20]) {} // 17.6
 
 int calculation(int x) { return x + 1; }
@@ -503,14 +662,48 @@ void misra_17_8(int x) {
   x = 3; // 17.8
 }
 
+void misra_18_4()
+{
+  int b = 42;
+  int *bp = &b;
+  bp += 1; // 18.4
+  bp -= 2; // 18.4
+  int *p = bp - 2; // 18.4
+  int *ab = &b + 1; // 18.4
+  p = bp + p; // 18.4
+  bp = 1 + p + 1; // 18.4
+  b += 19; // no-warning
+  b = b + 9; // no-warning
+}
+
 void misra_18_5() {
   int *** p;  // 18.5
 }
+
+struct {
+  uint16_t len;
+  struct {
+    uint8_t data_1[]; // 18.7
+  } nested_1;
+  struct named {
+    struct {
+      uint8_t len_1;
+      uint32_t data_2[]; // 18.7
+    } nested_2;
+    uint8_t data_3[]; // 18.7
+  } nested_3;
+} r18_7_struct;
+struct {
+  uint16_t len;
+  uint8_t data_1[ 19 ];
+  uint8_t data_2[   ]; // 18.7
+} r18_7_struct;
 
 void misra_18_8(int x) {
   int buf1[10];
   int buf2[sizeof(int)];
   int vla[x]; // 18.8
+  static const unsigned char arr18_8_1[] = UNDEFINED_ID;
 }
 
 union misra_19_2 { }; // 19.2
@@ -535,6 +728,61 @@ union misra_19_2 { }; // 19.2
 # definesomethingis 6 // 20.13
 # def fun_2013(v) () // 20.13
 #endif
+
+#define _Incompatible 0xdeadbeef // 21.1
+#define __Incompatible 0xdeadbeef // 21.1
+#define __starts_with_lower 0xdeadbeef // 21.1
+#define __MY_HEADER_ // 21.1
+#define _macro_starts_with_lower 1 // no warning
+static int _file_scope_id_21_1 = 42; // no warning
+static int _file_scope_id_21_1_fn() { return 42; } // no warning
+static int __file_scope_id_21_1 = 42; // 21.1
+static int __file_scope_id_21_1_fn() { return 42; } // 21.1
+static int _File_scope_id_21_1 = 42; // 21.1
+static int _File_scope_id_21_1_fn() { return 42; } // 21.1
+int _external_scope_id_21_1 = 42; // 21.1
+int _external_scope_id_21_1_fn() { return 42; } // 21.1
+int __external_scope_id_21_1 = 42; // 21.1
+int __external_scope_id_21_1_fn() { return 42; } // 21.1
+int _External_scope_id_21_1 = 42; // 21.1
+int _External_scope_id_21_1_fn() { return 42; } // 21.1
+int errno = 42; // 21.1 5.5
+int misra_21_1() {
+    int _a = 42; // 21.1
+    errno = EINVAL; // no warning
+    _a ++; // no warning
+    _exit(1); // no warning
+    return _a; // no warning
+}
+int _misra_21_1_1(); // 21.1
+static int _misra_21_1_2(); // no warning
+#define errno 11 // 21.1
+struct _struct_21_1 { int a; }; // 21.1
+struct _Struct_21_1 { int a; }; // 21.1
+struct __struct_21_1 { int a; }; // 21.1
+typedef struct { int a; } _struct_21_1_t; // 21.1
+typedef struct { int a; } _Struct_21_1_t; // 21.1
+typedef struct { int a; } __struct_21_1_t; // 21.1
+enum _enum_21_1 { ENUM211_1 }; // 21.1
+enum _Enum_21_1 { ENUM211_2 }; // 21.1
+enum __enum_21_1 { ENUM211_3 }; // 21.1
+enum __enum_21_1 { ENUM211_3 }; // 21.1
+typedef enum { ENUM211_4 } _enum_21_1_t; // 21.1
+typedef enum { ENUM211_5 } _Enum_21_1_t; // 21.1
+typedef enum { ENUM211_6 } __enum_21_1_t; // 21.1
+enum enum_21_1_valid_id {
+    ENUM211_7,
+    _ENUM211_8, // 21.1
+    __ENUM211_9, // 21.1
+    _eNUM211_10, // 21.1
+    enum211_11
+};
+union _union_21_1 { int a; }; // 21.1 19.2
+union _Union_21_1 { int a; }; // 21.1 19.2
+union __union_21_1 { int a; }; // 21.1 19.2
+typedef union { int a; } _union_21_1_t; // 21.1 19.2
+typedef union { int a; } _Union_21_1_t; // 21.1 19.2
+typedef union { int a; } __union_21_1_t; // 21.1 19.2
 
 void misra_21_3() {
   p1=malloc(10); // 21.3
@@ -561,3 +809,14 @@ void misra_21_9() {
   (void)bsearch(key,base,num,size,cmp); // 21.9
   qsort(base,num,size,cmp); // 21.9
 }
+
+void misra_21_12() {
+    int rc;
+    fexcept_t f; // 21.12
+    rc = feclearexcept(1); // 21.12
+    rc = fegetexceptflag(&f, 1); // 21.12
+    rc = feraiseexcept(1); // 21.12
+    rc = fesetexceptflag(&f, 1); // 21.12
+    rc = fetestexcept(1); // 21.12
+}
+

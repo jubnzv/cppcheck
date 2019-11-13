@@ -58,25 +58,25 @@ class CPPCHECKLIB Tokenizer {
     /** Class used in Tokenizer::setVarIdPass1 */
     class VariableMap {
     private:
-        std::map<std::string, unsigned int> mVariableId;
-        std::stack<std::list<std::pair<std::string, unsigned int> > > mScopeInfo;
-        mutable unsigned int mVarId;
+        std::map<std::string, int> mVariableId;
+        std::stack<std::list<std::pair<std::string,int> > > mScopeInfo;
+        mutable nonneg int mVarId;
     public:
         VariableMap();
         void enterScope();
         bool leaveScope();
         void addVariable(const std::string &varname);
         bool hasVariable(const std::string &varname) const;
-        std::map<std::string, unsigned int>::const_iterator find(const std::string &varname) const {
+        std::map<std::string,int>::const_iterator find(const std::string &varname) const {
             return mVariableId.find(varname);
         }
-        std::map<std::string, unsigned int>::const_iterator end() const {
+        std::map<std::string,int>::const_iterator end() const {
             return mVariableId.end();
         }
-        const std::map<std::string, unsigned int> &map() const {
+        const std::map<std::string,int> &map() const {
             return mVariableId;
         }
-        unsigned int *getVarId() const {
+        nonneg int *getVarId() const {
             return &mVarId;
         }
     };
@@ -154,8 +154,6 @@ public:
     */
     bool simplifyTokenList1(const char FileName[]);
 
-    void SimplifyNamelessRValueReferences();
-
     /**
     * Most aggressive simplification of tokenlist
     *
@@ -199,7 +197,7 @@ public:
      * @param type Token which will contain e.g. "int", "*", or string.
      * @return sizeof for given type, or 0 if it can't be calculated.
      */
-    unsigned int sizeOfType(const Token *type) const;
+    nonneg int sizeOfType(const Token *type) const;
 
     /**
      * Try to determine if function parameter is passed by value by looking
@@ -249,6 +247,8 @@ public:
 
     /** Remove macros in global scope */
     void removeMacrosInGlobalScope();
+
+    void addSemicolonAfterUnknownMacro();
 
     /** Remove undefined macro in class definition:
       * class DLLEXPORT Fred { };
@@ -378,6 +378,10 @@ public:
 
     /**
      */
+    bool isMemberFunction(const Token *openParen) const;
+
+    /**
+     */
     bool simplifyUsing();
 
     /**
@@ -403,13 +407,13 @@ public:
      * Utility function for simplifyKnownVariables. Get data about an
      * assigned variable.
      */
-    static bool simplifyKnownVariablesGetData(unsigned int varid, Token **_tok2, Token **_tok3, std::string &value, unsigned int &valueVarId, bool &valueIsPointer, bool floatvar);
+    static bool simplifyKnownVariablesGetData(nonneg int varid, Token **_tok2, Token **_tok3, std::string &value, nonneg int &valueVarId, bool &valueIsPointer, bool floatvar);
 
     /**
      * utility function for simplifyKnownVariables. Perform simplification
      * of a given variable
      */
-    bool simplifyKnownVariablesSimplify(Token **tok2, Token *tok3, unsigned int varid, const std::string &structname, std::string &value, unsigned int valueVarId, bool valueIsPointer, const Token * const valueToken, int indentlevel) const;
+    bool simplifyKnownVariablesSimplify(Token **tok2, Token *tok3, nonneg int varid, const std::string &structname, std::string &value, nonneg int valueVarId, bool valueIsPointer, const Token * const valueToken, int indentlevel) const;
 
     /** Simplify useless C++ empty namespaces, like: 'namespace %name% { }'*/
     void simplifyEmptyNamespaces();
@@ -652,6 +656,11 @@ private:
     void simplifyAttribute();
 
     /**
+     * Remove \__cppcheck\__ ((?))
+     */
+    void simplifyCppcheckAttribute();
+
+    /**
      * Remove keywords "volatile", "inline", "register", and "restrict"
      */
     void simplifyKeyword();
@@ -760,19 +769,19 @@ private:
 
     void setVarIdClassDeclaration(const Token * const startToken,
                                   const VariableMap &variableMap,
-                                  const unsigned int scopeStartVarId,
-                                  std::map<unsigned int, std::map<std::string,unsigned int> >& structMembers);
+                                  const nonneg int scopeStartVarId,
+                                  std::map<int, std::map<std::string,int> >& structMembers);
 
     void setVarIdStructMembers(Token **tok1,
-                               std::map<unsigned int, std::map<std::string, unsigned int> >& structMembers,
-                               unsigned int *varId);
+                               std::map<int, std::map<std::string, int> >& structMembers,
+                               nonneg int *varId);
 
     void setVarIdClassFunction(const std::string &classname,
                                Token * const startToken,
                                const Token * const endToken,
-                               const std::map<std::string, unsigned int> &varlist,
-                               std::map<unsigned int, std::map<std::string, unsigned int> >& structMembers,
-                               unsigned int *varId_);
+                               const std::map<std::string,int> &varlist,
+                               std::map<int, std::map<std::string,int> >& structMembers,
+                               nonneg int *varId_);
 
     /**
      * Simplify e.g. 'return(strncat(temp,"a",1));' into
@@ -812,7 +821,7 @@ public:
      * 1=1st simplifications
      * 2=2nd simplifications
      */
-    void printDebugOutput(unsigned int simplification) const;
+    void printDebugOutput(int simplification) const;
 
     void dump(std::ostream &out) const;
 
@@ -822,7 +831,7 @@ public:
      * Get variable count.
      * @return number of variables
      */
-    unsigned int varIdCount() const {
+    nonneg int varIdCount() const {
         return mVarId;
     }
 
@@ -877,20 +886,22 @@ public:
         return mSettings;
     }
 
-private:
+    void calculateScopes();
+
     /** Disable copy constructor */
     Tokenizer(const Tokenizer &) = delete;
 
     /** Disable assignment operator */
     Tokenizer &operator=(const Tokenizer &) = delete;
 
+private:
     Token *processFunc(Token *tok2, bool inOperator) const;
 
     /**
     * Get new variable id.
     * @return new variable id
     */
-    unsigned int newVarId() {
+    nonneg int newVarId() {
         return ++mVarId;
     }
 
@@ -913,13 +924,13 @@ private:
     std::string mConfiguration;
 
     /** sizeof information for known types */
-    std::map<std::string, unsigned int> mTypeSize;
+    std::map<std::string, int> mTypeSize;
 
     /** variable count */
-    unsigned int mVarId;
+    nonneg int mVarId;
 
     /** unnamed count "Unnamed0", "Unnamed1", "Unnamed2", ... */
-    unsigned int mUnnamedCount;
+    nonneg int mUnnamedCount;
 
     /**
      * was there any templates? templates that are "unused" are

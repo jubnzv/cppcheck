@@ -9,6 +9,7 @@
 # cppcheck --dump main.cpp
 # python cert.py main.cpp.dump
 
+import argparse
 import cppcheckdata
 import sys
 import re
@@ -82,21 +83,18 @@ def isStandardFunction(token):
                 return False
     return True
 
-# Get function arguments
-def getArgumentsRecursive(tok, arguments):
-    if tok is None:
-        return
-    if tok.str == ',':
-        getArgumentsRecursive(tok.astOperand1, arguments)
-        getArgumentsRecursive(tok.astOperand2, arguments)
-    else:
-        arguments.append(tok)
+# Is this a function call
+def isFunctionCall(token, function_names, number_of_arguments=None):
+    if not token.isName:
+        return False
+    if token.str not in function_names:
+        return False
+    if (token.next is None) or token.next.str != '(' or token.next != token.astParent:
+        return False
+    if number_of_arguments is None:
+        return True
+    return len(cppcheckdata.getArguments(token)) == number_of_arguments
 
-
-def getArguments(ftok):
-    arguments = []
-    getArgumentsRecursive(ftok.astOperand2, arguments)
-    return arguments
 
 # EXP05-C
 # do not attempt to cast away const
@@ -120,7 +118,7 @@ def exp05(data):
 
         elif token.str == '(' and token.astOperand1 and token.astOperand2 and token.astOperand1.function:
             function = token.astOperand1.function
-            arguments = getArguments(token)
+            arguments = cppcheckdata.getArguments(token.previous)
             for argnr, argvar in function.argument.items():
                 if argnr < 1 or argnr > len(arguments):
                     continue
@@ -156,6 +154,15 @@ def exp42(data):
             reportError(
                 token, 'style', "Comparison of struct padding data " +
                 "(fix either by packing the struct using '#pragma pack' or by rewriting the comparison)", 'EXP42-C')
+
+# EXP15-C
+# Do not place a semicolon on the same line as an if, for or while statement
+def exp15(data):
+    for scope in data.scopes:
+        if scope.type in ('If', 'For', 'While'):
+            token = scope.bodyStart.next
+            if token.str==';' and token.linenr==scope.bodyStart.linenr:
+                reportError(token, 'style', 'Do not place a semicolon on the same line as an IF, FOR or WHILE', 'EXP15-C')
 
 
 # EXP46-C
@@ -226,6 +233,30 @@ def int31(data, platform):
                     'Ensure that integer conversions do not result in lost or misinterpreted data (casting ' + str(value.intvalue) + ' to ' + destType + ')',
                     'INT31-c')
                 break
+# MSC24-C
+# Do not use deprecated or obsolescent functions
+def msc24(data):
+    for token in data.tokenlist:
+        if isFunctionCall(token, ('asctime',), 1):
+            reportError(token,'style','Do not use asctime() better use asctime_s()', 'MSC24-C')
+        elif isFunctionCall(token, ('atof',), 1):
+            reportError(token,'style','Do not use atof() better use strtod()', 'MSC24-C')
+        elif isFunctionCall(token, ('atoi',), 1):
+            reportError(token,'style','Do not use atoi() better use strtol()', 'MSC24-C')
+        elif isFunctionCall(token, ('atol',), 1):
+            reportError(token,'style','Do not use atol() better use strtol()', 'MSC24-C')
+        elif isFunctionCall(token, ('atoll',), 1):
+            reportError(token,'style','Do not use atoll() better use strtoll()', 'MSC24-C')
+        elif isFunctionCall(token, ('ctime',), 1):
+            reportError(token,'style','Do not use ctime() better use ctime_s()', 'MSC24-C')
+        elif isFunctionCall(token, ('fopen',), 2):
+            reportError(token,'style','Do not use fopen() better use fopen_s()', 'MSC24-C')
+        elif isFunctionCall(token, ('freopen',), 3):
+            reportError(token,'style','Do not use freopen() better use freopen_s()', 'MSC24-C')
+        elif isFunctionCall(token, ('rewind',), 1):
+            reportError(token,'style','Do not use rewind() better use fseek()', 'MSC24-C')
+        elif isFunctionCall(token, ('setbuf',), 2):
+            reportError(token,'style','Do not use setbuf() better use setvbuf()', 'MSC24-C')
 
 # MSC30-C
 # Do not use the rand() function for generating pseudorandom numbers
@@ -234,39 +265,149 @@ def msc30(data):
         if simpleMatch(token, "rand ( )") and isStandardFunction(token):
             reportError(token, 'style', 'Do not use the rand() function for generating pseudorandom numbers', 'MSC30-c')
 
-for arg in sys.argv[1:]:
-    if arg == '-verify':
+# STR03-C
+# Do not inadvertently truncate a string
+def str03(data):
+    for token in data.tokenlist:
+        if not isFunctionCall(token, 'strncpy'):
+            continue
+        arguments = cppcheckdata.getArguments(token)
+        if len(arguments)!=3:
+            continue
+        if arguments[2].str=='(' and arguments[2].astOperand1.str=='sizeof':
+            reportError(token, 'style', 'Do not inadvertently truncate a string', 'STR03-C')
+
+# STR05-C
+# Use pointers to const when referring to string literals
+def str05(data):
+    for token in data.tokenlist:
+        if token.isString:
+            parent = token.astParent
+            if parent is None:
+                continue
+            parentOp1 = parent.astOperand1
+            if parent.isAssignmentOp and parentOp1.valueType:
+                if (parentOp1.valueType.type in ('char', 'wchar_t')) and parentOp1.valueType.pointer and not parentOp1.valueType.constness:
+                    reportError(parentOp1, 'style', 'Use pointers to const when referring to string literals', 'STR05-C')
+
+# STR07-C
+# Use the bounds-checking interfaces for string manipulation
+def str07(data):
+    for token in data.tokenlist:
+        if not isFunctionCall(token, ('strcpy', 'strcat')):
+            continue
+        args = cppcheckdata.getArguments(token)
+        if len(args)!=2:
+            continue
+        if args[1].isString:
+            continue
+        reportError(token, 'style', 'Use the bounds-checking interfaces %s_s()' % (token.str), 'STR07-C')
+
+# STR11-C
+# Do not specify the bound of a character array initialized with a string literal
+def str11(data):
+    for token in data.tokenlist:
+        if not token.isString:
+            continue
+
+        strlen = token.strlen
+        parent = token.astParent
+
+        if parent is None:
+            continue
+        parentOp1 = parent.astOperand1
+        if parentOp1 is None or parentOp1.str!='[':
+            continue
+
+        if not parent.isAssignmentOp:
+            continue
+
+        varToken = parentOp1.astOperand1
+        if varToken is None or not varToken.isName:
+            continue
+        if varToken.variable is None:
+            continue
+        if varToken != varToken.variable.nameToken:
+            continue
+        valueToken = parentOp1.astOperand2
+        if valueToken is None:
+            continue
+
+        if valueToken.isNumber and int(valueToken.str)==strlen:
+            reportError(valueToken, 'style', 'Do not specify the bound of a character array initialized with a string literal', 'STR11-C')
+
+# API01-C
+# Avoid laying out strings in memory directly before sensitive data
+def api01(data):
+    for scope in data.scopes:
+        if scope.type!='Struct':
+            continue
+        token = scope.bodyStart
+        arrayFound=False
+        # loop through the complete struct
+        while token != scope.bodyEnd:
+            if token.isName and token.variable:
+                if token.variable.isArray:
+                    arrayFound=True
+                elif arrayFound and not token.variable.isArray and not token.variable.isConst:
+                    reportError(token, 'style', 'Avoid laying out strings in memory directly before sensitive data', 'API01-C')
+                    # reset flags to report other positions in the same struct
+                    arrayFound=False
+            token = token.next
+
+
+def get_args():
+    parser = cppcheckdata.ArgumentParser()
+    parser.add_argument("dumpfile", nargs='*', help="Path of dump files from cppcheck")
+    parser.add_argument('-q', '--quiet', action='store_true',
+                        help='do not print "Checking ..." lines')
+    parser.add_argument('--cli', help='Addon is executed from Cppcheck', action='store_true')
+    parser.add_argument("-verify", help=argparse.SUPPRESS, action="store_true")
+    return parser.parse_args()
+
+if __name__ == '__main__':
+    args = get_args()
+
+    if args.verify:
         VERIFY = True
-        continue
-    if arg == '--cli':
-        continue
-    print('Checking ' + arg + '...')
-    data = cppcheckdata.parsedump(arg)
 
-    if VERIFY:
-        VERIFY_ACTUAL = []
-        VERIFY_EXPECTED = []
-        for tok in data.rawTokens:
-            if tok.str.startswith('//') and 'TODO' not in tok.str:
-                for word in tok.str[2:].split(' '):
-                    if re.match(r'cert-[A-Z][A-Z][A-Z][0-9][0-9].*',word):
-                        VERIFY_EXPECTED.append(str(tok.linenr) + ':' + word)
+    for dumpfile in args.dumpfile:
+        if not args.quiet:
+            print('Checking %s...' % dumpfile)
 
-    for cfg in data.configurations:
-        if len(data.configurations) > 1:
-            print('Checking ' + arg + ', config "' + cfg.name + '"...')
-        exp05(cfg)
-        exp42(cfg)
-        exp46(cfg)
-        int31(cfg, data.platform)
-        msc30(cfg)
+        data = cppcheckdata.parsedump(dumpfile)
 
-    if VERIFY:
-        for expected in VERIFY_EXPECTED:
-            if expected not in VERIFY_ACTUAL:
-                print('Expected but not seen: ' + expected)
-                sys.exit(1)
-        for actual in VERIFY_ACTUAL:
-            if actual not in VERIFY_EXPECTED:
-                print('Not expected: ' + actual)
-                sys.exit(1)
+        if VERIFY:
+            VERIFY_ACTUAL = []
+            VERIFY_EXPECTED = []
+            for tok in data.rawTokens:
+                if tok.str.startswith('//') and 'TODO' not in tok.str:
+                    for word in tok.str[2:].split(' '):
+                        if re.match(r'cert-[A-Z][A-Z][A-Z][0-9][0-9].*',word):
+                            VERIFY_EXPECTED.append(str(tok.linenr) + ':' + word)
+
+        for cfg in data.configurations:
+            if (len(data.configurations) > 1) and (not args.quiet):
+                print('Checking %s, config %s...' % (dumpfile, cfg.name))
+            exp05(cfg)
+            exp42(cfg)
+            exp46(cfg)
+            exp15(cfg)
+            int31(cfg, data.platform)
+            str03(cfg)
+            str05(cfg)
+            str07(cfg)
+            str11(cfg)
+            msc24(cfg)
+            msc30(cfg)
+            api01(cfg)
+
+        if VERIFY:
+            for expected in VERIFY_EXPECTED:
+                if expected not in VERIFY_ACTUAL:
+                    print('Expected but not seen: ' + expected)
+                    sys.exit(1)
+            for actual in VERIFY_ACTUAL:
+                if actual not in VERIFY_EXPECTED:
+                    print('Not expected: ' + actual)
+                    sys.exit(1)

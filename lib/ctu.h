@@ -33,23 +33,24 @@
 namespace CTU {
     class CPPCHECKLIB FileInfo : public Check::FileInfo {
     public:
-        enum InvalidValueType { null, uninit, bufferOverflow };
+        enum class InvalidValueType { null, uninit, bufferOverflow };
 
         std::string toString() const OVERRIDE;
 
         struct Location {
             Location() = default;
             Location(const Tokenizer *tokenizer, const Token *tok);
-            Location(const std::string &fileName, unsigned int linenr) : fileName(fileName), linenr(linenr) {}
+            Location(const std::string &fileName, nonneg int lineNumber, nonneg int column) : fileName(fileName), lineNumber(lineNumber), column(column) {}
             std::string fileName;
-            unsigned int linenr;
+            nonneg int lineNumber;
+            nonneg int column;
         };
 
         struct UnsafeUsage {
             UnsafeUsage() = default;
-            UnsafeUsage(const std::string &myId, unsigned int myArgNr, const std::string &myArgumentName, const Location &location, MathLib::bigint value) : myId(myId), myArgNr(myArgNr), myArgumentName(myArgumentName), location(location), value(value) {}
+            UnsafeUsage(const std::string &myId, nonneg int myArgNr, const std::string &myArgumentName, const Location &location, MathLib::bigint value) : myId(myId), myArgNr(myArgNr), myArgumentName(myArgumentName), location(location), value(value) {}
             std::string myId;
-            unsigned int myArgNr;
+            nonneg int myArgNr;
             std::string myArgumentName;
             Location location;
             MathLib::bigint value;
@@ -89,7 +90,7 @@ namespace CTU {
         public:
             NestedCall() = default;
 
-            NestedCall(const std::string &myId, unsigned int myArgNr, const std::string &callId, unsigned int callArgnr, const std::string &callFunctionName, const Location &location)
+            NestedCall(const std::string &myId, nonneg int myArgNr, const std::string &callId, nonneg int callArgnr, const std::string &callFunctionName, const Location &location)
                 : CallBase(callId, callArgnr, callFunctionName, location),
                   myId(myId),
                   myArgNr(myArgNr) {
@@ -101,7 +102,7 @@ namespace CTU {
             bool loadFromXml(const tinyxml2::XMLElement *xmlElement);
 
             std::string myId;
-            unsigned int myArgNr;
+            nonneg int myArgNr;
         };
 
         std::list<FunctionCall> functionCalls;

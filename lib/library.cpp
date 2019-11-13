@@ -39,7 +39,7 @@ static std::vector<std::string> getnames(const char *names)
         ret.emplace_back(names, p-names);
         names = p + 1;
     }
-    ret.push_back(names);
+    ret.emplace_back(names);
     return ret;
 }
 
@@ -95,8 +95,8 @@ Library::Error Library::load(const char exename[], const char path[])
         }
 
         std::list<std::string> cfgfolders;
-#ifdef CFGDIR
-        cfgfolders.push_back(CFGDIR);
+#ifdef FILESDIR
+        cfgfolders.emplace_back(FILESDIR "/cfg");
 #endif
         if (exename) {
             const std::string exepath(Path::fromNativeSeparators(Path::getPathFromFilename(exename)));
@@ -105,8 +105,8 @@ Library::Error Library::load(const char exename[], const char path[])
         }
 
         while (error == tinyxml2::XML_ERROR_FILE_NOT_FOUND && !cfgfolders.empty()) {
-            const std::string cfgfolder(cfgfolders.front());
-            cfgfolders.pop_front();
+            const std::string cfgfolder(cfgfolders.back());
+            cfgfolders.pop_back();
             const char *sep = (!cfgfolder.empty() && endsWith(cfgfolder,'/') ? "" : "/");
             const std::string filename(cfgfolder + sep + fullfilename);
             error = doc.LoadFile(filename.c_str());
@@ -188,7 +188,7 @@ Library::Error Library::load(const tinyxml2::XMLDocument &doc)
             // add alloc/dealloc/use functions..
             for (const tinyxml2::XMLElement *memorynode = node->FirstChildElement(); memorynode; memorynode = memorynode->NextSiblingElement()) {
                 const std::string memorynodename = memorynode->Name();
-                if (memorynodename == "alloc") {
+                if (memorynodename == "alloc" || memorynodename == "realloc") {
                     AllocFunc temp = {0};
                     temp.groupId = allocationId;
 
@@ -225,7 +225,18 @@ Library::Error Library::load(const tinyxml2::XMLDocument &doc)
                             return Error(BAD_ATTRIBUTE_VALUE, bufferSize);
                     }
 
-                    mAlloc[memorynode->GetText()] = temp;
+                    if (memorynodename == "realloc") {
+                        const char *reallocArg =  memorynode->Attribute("realloc-arg");
+                        if (reallocArg)
+                            temp.reallocArg = atoi(reallocArg);
+                        else
+                            temp.reallocArg = 1;
+                    }
+
+                    if (memorynodename != "realloc")
+                        mAlloc[memorynode->GetText()] = temp;
+                    else
+                        mRealloc[memorynode->GetText()] = temp;
                 } else if (memorynodename == "dealloc") {
                     AllocFunc temp = {0};
                     temp.groupId = allocationId;
@@ -409,55 +420,55 @@ Library::Error Library::load(const tinyxml2::XMLDocument &doc)
                             return Error(MISSING_ATTRIBUTE, "name");
 
                         const char* const action_ptr = functionNode->Attribute("action");
-                        Container::Action action = Container::NO_ACTION;
+                        Container::Action action = Container::Action::NO_ACTION;
                         if (action_ptr) {
                             std::string actionName = action_ptr;
                             if (actionName == "resize")
-                                action = Container::RESIZE;
+                                action = Container::Action::RESIZE;
                             else if (actionName == "clear")
-                                action = Container::CLEAR;
+                                action = Container::Action::CLEAR;
                             else if (actionName == "push")
-                                action = Container::PUSH;
+                                action = Container::Action::PUSH;
                             else if (actionName == "pop")
-                                action = Container::POP;
+                                action = Container::Action::POP;
                             else if (actionName == "find")
-                                action = Container::FIND;
+                                action = Container::Action::FIND;
                             else if (actionName == "insert")
-                                action = Container::INSERT;
+                                action = Container::Action::INSERT;
                             else if (actionName == "erase")
-                                action = Container::ERASE;
+                                action = Container::Action::ERASE;
                             else if (actionName == "change-content")
-                                action = Container::CHANGE_CONTENT;
+                                action = Container::Action::CHANGE_CONTENT;
                             else if (actionName == "change-internal")
-                                action = Container::CHANGE_INTERNAL;
+                                action = Container::Action::CHANGE_INTERNAL;
                             else if (actionName == "change")
-                                action = Container::CHANGE;
+                                action = Container::Action::CHANGE;
                             else
                                 return Error(BAD_ATTRIBUTE_VALUE, actionName);
                         }
 
                         const char* const yield_ptr = functionNode->Attribute("yields");
-                        Container::Yield yield = Container::NO_YIELD;
+                        Container::Yield yield = Container::Yield::NO_YIELD;
                         if (yield_ptr) {
                             std::string yieldName = yield_ptr;
                             if (yieldName == "at_index")
-                                yield = Container::AT_INDEX;
+                                yield = Container::Yield::AT_INDEX;
                             else if (yieldName == "item")
-                                yield = Container::ITEM;
+                                yield = Container::Yield::ITEM;
                             else if (yieldName == "buffer")
-                                yield = Container::BUFFER;
+                                yield = Container::Yield::BUFFER;
                             else if (yieldName == "buffer-nt")
-                                yield = Container::BUFFER_NT;
+                                yield = Container::Yield::BUFFER_NT;
                             else if (yieldName == "start-iterator")
-                                yield = Container::START_ITERATOR;
+                                yield = Container::Yield::START_ITERATOR;
                             else if (yieldName == "end-iterator")
-                                yield = Container::END_ITERATOR;
+                                yield = Container::Yield::END_ITERATOR;
                             else if (yieldName == "iterator")
-                                yield = Container::ITERATOR;
+                                yield = Container::Yield::ITERATOR;
                             else if (yieldName == "size")
-                                yield = Container::SIZE;
+                                yield = Container::Yield::SIZE;
                             else if (yieldName == "empty")
-                                yield = Container::EMPTY;
+                                yield = Container::Yield::EMPTY;
                             else
                                 return Error(BAD_ATTRIBUTE_VALUE, yieldName);
                         }
@@ -502,6 +513,22 @@ Library::Error Library::load(const tinyxml2::XMLDocument &doc)
             if (!name)
                 return Error(MISSING_ATTRIBUTE, "name");
             PodType podType = {0};
+            podType.stdtype = PodType::NO;
+            const char * const stdtype = node->Attribute("stdtype");
+            if (stdtype) {
+                if (std::strcmp(stdtype, "bool") == 0)
+                    podType.stdtype = PodType::BOOL;
+                else if (std::strcmp(stdtype, "char") == 0)
+                    podType.stdtype = PodType::CHAR;
+                else if (std::strcmp(stdtype, "short") == 0)
+                    podType.stdtype = PodType::SHORT;
+                else if (std::strcmp(stdtype, "int") == 0)
+                    podType.stdtype = PodType::INT;
+                else if (std::strcmp(stdtype, "long") == 0)
+                    podType.stdtype = PodType::LONG;
+                else if (std::strcmp(stdtype, "long long") == 0)
+                    podType.stdtype = PodType::LONGLONG;
+            }
             const char * const size = node->Attribute("size");
             if (size)
                 podType.size = atoi(size);
@@ -607,6 +634,12 @@ Library::Error Library::loadFunction(const tinyxml2::XMLElement * const node, co
                 mReturnValueType[name] = type;
             if (const char *container = functionnode->Attribute("container"))
                 mReturnValueContainer[name] = std::atoi(container);
+            if (const char *unknownReturnValues = functionnode->Attribute("unknownValues")) {
+                if (std::strcmp(unknownReturnValues, "all") == 0) {
+                    std::vector<MathLib::bigint> values{LLONG_MIN, LLONG_MAX};
+                    mUnknownReturnValues[name] = values;
+                }
+            }
         } else if (functionnodename == "arg") {
             const char* argNrString = functionnode->Attribute("nr");
             if (!argNrString)
@@ -630,12 +663,16 @@ Library::Error Library::loadFunction(const tinyxml2::XMLElement * const node, co
             }
             for (const tinyxml2::XMLElement *argnode = functionnode->FirstChildElement(); argnode; argnode = argnode->NextSiblingElement()) {
                 const std::string argnodename = argnode->Name();
+                int indirect = 0;
+                const char * const indirectStr = node->Attribute("indirect");
+                if (indirectStr)
+                    indirect = atoi(indirectStr);
                 if (argnodename == "not-bool")
                     ac.notbool = true;
                 else if (argnodename == "not-null")
                     ac.notnull = true;
                 else if (argnodename == "not-uninit")
-                    ac.notuninit = true;
+                    ac.notuninit = indirect;
                 else if (argnodename == "formatstr")
                     ac.formatstr = true;
                 else if (argnodename == "strz")
@@ -742,6 +779,8 @@ Library::Error Library::loadFunction(const tinyxml2::XMLElement * const node, co
                 else
                     unknown_elements.insert(argnodename);
             }
+            if (ac.notuninit == 0)
+                ac.notuninit = ac.notnull ? 1 : 0;
         } else if (functionnodename == "ignorefunction") {
             func.ignore = true;
         } else if (functionnodename == "formatstr") {
@@ -852,8 +891,7 @@ std::string Library::getFunctionName(const Token *ftok, bool *error) const
             if (!scope->isClassOrStruct())
                 continue;
             const std::vector<Type::BaseInfo> &derivedFrom = scope->definedType->derivedFrom;
-            for (unsigned int i = 0; i < derivedFrom.size(); ++i) {
-                const Type::BaseInfo &baseInfo = derivedFrom[i];
+            for (const Type::BaseInfo & baseInfo : derivedFrom) {
                 const std::string name(baseInfo.name + "::" + ftok->str());
                 if (functions.find(name) != functions.end() && matchArguments(ftok, name))
                     return name;
@@ -919,7 +957,7 @@ bool Library::isnullargbad(const Token *ftok, int argnr) const
     return arg && arg->notnull;
 }
 
-bool Library::isuninitargbad(const Token *ftok, int argnr) const
+bool Library::isuninitargbad(const Token *ftok, int argnr, int indirect) const
 {
     const ArgumentChecks *arg = getarg(ftok, argnr);
     if (!arg) {
@@ -929,35 +967,49 @@ bool Library::isuninitargbad(const Token *ftok, int argnr) const
         if (it != functions.cend() && it->second.formatstr && !it->second.formatstr_scan)
             return true;
     }
-    return arg && arg->notuninit;
+    return arg && arg->notuninit >= indirect;
 }
 
 
 /** get allocation info for function */
-const Library::AllocFunc* Library::alloc(const Token *tok) const
+const Library::AllocFunc* Library::getAllocFuncInfo(const Token *tok) const
 {
     const std::string funcname = getFunctionName(tok);
     return isNotLibraryFunction(tok) && functions.find(funcname) != functions.end() ? nullptr : getAllocDealloc(mAlloc, funcname);
 }
 
 /** get deallocation info for function */
-const Library::AllocFunc* Library::dealloc(const Token *tok) const
+const Library::AllocFunc* Library::getDeallocFuncInfo(const Token *tok) const
 {
     const std::string funcname = getFunctionName(tok);
     return isNotLibraryFunction(tok) && functions.find(funcname) != functions.end() ? nullptr : getAllocDealloc(mDealloc, funcname);
 }
 
-/** get allocation id for function */
-int Library::alloc(const Token *tok, int arg) const
+/** get reallocation info for function */
+const Library::AllocFunc* Library::getReallocFuncInfo(const Token *tok) const
 {
-    const Library::AllocFunc* af = alloc(tok);
+    const std::string funcname = getFunctionName(tok);
+    return isNotLibraryFunction(tok) && functions.find(funcname) != functions.end() ? nullptr : getAllocDealloc(mRealloc, funcname);
+}
+
+/** get allocation id for function */
+int Library::getAllocId(const Token *tok, int arg) const
+{
+    const Library::AllocFunc* af = getAllocFuncInfo(tok);
     return (af && af->arg == arg) ? af->groupId : 0;
 }
 
 /** get deallocation id for function */
-int Library::dealloc(const Token *tok, int arg) const
+int Library::getDeallocId(const Token *tok, int arg) const
 {
-    const Library::AllocFunc* af = dealloc(tok);
+    const Library::AllocFunc* af = getDeallocFuncInfo(tok);
+    return (af && af->arg == arg) ? af->groupId : 0;
+}
+
+/** get reallocation id for function */
+int Library::getReallocId(const Token *tok, int arg) const
+{
+    const Library::AllocFunc* af = getReallocFuncInfo(tok);
     return (af && af->arg == arg) ? af->groupId : 0;
 }
 
@@ -1170,6 +1222,14 @@ int Library::returnValueContainer(const Token *ftok) const
     return it != mReturnValueContainer.end() ? it->second : -1;
 }
 
+std::vector<MathLib::bigint> Library::unknownReturnValues(const Token *ftok) const
+{
+    if (isNotLibraryFunction(ftok))
+        return std::vector<MathLib::bigint>();
+    const std::map<std::string, std::vector<MathLib::bigint>>::const_iterator it = mUnknownReturnValues.find(getFunctionName(ftok));
+    return (it == mUnknownReturnValues.end()) ? std::vector<MathLib::bigint>() : it->second;
+}
+
 bool Library::hasminsize(const Token *ftok) const
 {
     if (isNotLibraryFunction(ftok))
@@ -1320,5 +1380,25 @@ bool Library::isSmartPointer(const Token *tok) const
         tok = tok->next();
     }
     return smartPointers.find(typestr) != smartPointers.end();
+}
+
+CPPCHECKLIB const Library::Container * getLibraryContainer(const Token * tok)
+{
+    if (!tok)
+        return nullptr;
+    // TODO: Support dereferencing iterators
+    // TODO: Support dereferencing with ->
+    if (tok->isUnaryOp("*") && astIsPointer(tok->astOperand1())) {
+        for (const ValueFlow::Value& v:tok->astOperand1()->values()) {
+            if (!v.isLocalLifetimeValue())
+                continue;
+            if (v.lifetimeKind != ValueFlow::Value::LifetimeKind::Address)
+                continue;
+            return getLibraryContainer(v.tokvalue);
+        }
+    }
+    if (!tok->valueType())
+        return nullptr;
+    return tok->valueType()->container;
 }
 

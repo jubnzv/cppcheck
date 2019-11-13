@@ -47,6 +47,7 @@ void bufferAccessOutOfBounds(void)
     // cppcheck-suppress bufferAccessOutOfBounds
     strcpy_s(a, 10, "abcdefghij");
     // TODO cppcheck-suppress redundantCopy
+    // cppcheck-suppress terminateStrncpy
     strncpy(a,"abcde",5);
     // cppcheck-suppress bufferAccessOutOfBounds
     // TODO cppcheck-suppress redundantCopy
@@ -102,6 +103,35 @@ void arrayIndexOutOfBounds()
     // cppcheck-suppress arrayIndexOutOfBounds
     pAlloc1[16] = '1';
     free(pAlloc1);
+
+    char * pAlloc2 = malloc(9);
+    pAlloc2[8] = 'a';
+    // cppcheck-suppress arrayIndexOutOfBounds
+    pAlloc2[9] = 'a';
+
+    // #1379
+    // cppcheck-suppress memleakOnRealloc
+    pAlloc2 = realloc(pAlloc2, 8);
+    pAlloc2[7] = 'b';
+    // cppcheck-suppress arrayIndexOutOfBounds
+    pAlloc2[8] = 0;
+    // cppcheck-suppress memleakOnRealloc
+    pAlloc2 = realloc(pAlloc2, 20);
+    pAlloc2[19] = 'b';
+    // cppcheck-suppress arrayIndexOutOfBounds
+    pAlloc2[20] = 0;
+    free(pAlloc2);
+
+    char * pAlloc3 = calloc(2,3);
+    pAlloc3[5] = 'a';
+    // cppcheck-suppress arrayIndexOutOfBounds
+    pAlloc3[6] = 1;
+    // cppcheck-suppress memleakOnRealloc
+    pAlloc3 = reallocarray(pAlloc3, 3,3);
+    pAlloc3[8] = 'a';
+    // cppcheck-suppress arrayIndexOutOfBounds
+    pAlloc3[9] = 1;
+    free(pAlloc3);
 }
 
 void resourceLeak_tmpfile(void)
@@ -117,7 +147,7 @@ void ignoreleak(void)
 {
     char *p = (char *)malloc(10);
     memset(&(p[0]), 0, 10);
-    // TODO cppcheck-suppress memleak
+    // cppcheck-suppress memleak
 }
 
 // null pointer
@@ -315,6 +345,26 @@ void nullPointer_wmemcmp(wchar_t *p)
 {
     // cppcheck-suppress nullPointer
     (void)wmemcmp(p, 0, 123);
+}
+
+void nullPointer_vsnprintf(const char * format, ...)
+{
+    va_list args;
+    // valid
+    char buffer[256];
+    va_start(args, format);
+    vsnprintf(buffer, 256, format, args);
+    printf("%s", buffer);
+    va_end(args);
+    // valid
+    va_start(args, format);
+    vsnprintf(NULL, 0, format, args);
+    va_end(args);
+    // invalid
+    va_start(args, format);
+    // TODO #9410 cppcheck-suppress nullPointer
+    vsnprintf(NULL, 10, format, args);
+    va_end(args);
 }
 
 // uninit pointers
@@ -1434,7 +1484,7 @@ void uninitvar_freopen(void)
     FILE *stream;
     // cppcheck-suppress uninitvar
     FILE * p = freopen(filename,mode,stream);
-    free(p);
+    fclose(p);
 }
 
 void uninitvar_frexp(void)
@@ -1569,6 +1619,15 @@ void uninitvar_mbrlen(const char* p, size_t m, mbstate_t* s)
     (void)mbrlen(p,m,s);
 }
 
+void nullPointer_mbrlen(const char* p, size_t m, mbstate_t* s)
+{
+    /* no warning is expected: A call to the function with a null pointer as pmb resets the shift state (and ignores parameter max). */
+    (void)mbrlen(NULL,m,s);
+    (void)mbrlen(NULL,0,s);
+    /* cppcheck-suppress nullPointer */
+    (void)mbrlen(p,m,NULL);
+}
+
 void uninitvar_btowc(void)
 {
     int c;
@@ -1583,23 +1642,41 @@ void uninitvar_mbsinit(void)
     (void)mbsinit(ps);
 }
 
-void uninitvar_mbstowcs(void)
+void uninitvar_mbstowcs(wchar_t* d, const char* s, size_t m)
 {
-    wchar_t *ws;
-    char *s;
-    size_t n;
+    wchar_t *dest;
+    char *src;
+    size_t max;
+    
     // cppcheck-suppress uninitvar
-    (void)mbstowcs(ws,s,n);
+    (void)mbstowcs(dest,s,m);
+    // cppcheck-suppress uninitvar
+    (void)mbstowcs(d,src,m);
+    // cppcheck-suppress uninitvar
+    (void)mbstowcs(d,s,max);
+    
+    // No warning is expected
+    (void)mbstowcs(d,s,m);
 }
 
-void uninitvar_mbsrtowcs(void)
+void uninitvar_mbsrtowcs(wchar_t* d, const char** s, size_t m, mbstate_t *p)
 {
     wchar_t* dest;
     const char* src;
     size_t max;
     mbstate_t* ps;
+    
     // cppcheck-suppress uninitvar
-    (void)mbsrtowcs(dest,&src,max,ps);
+    (void)mbsrtowcs(dest,s,m,p);
+    // cppcheck-suppress uninitvar
+    (void)mbsrtowcs(d,&src,m,p);
+    // cppcheck-suppress uninitvar
+    (void)mbsrtowcs(d,s,max,p);
+    // cppcheck-suppress uninitvar
+    (void)mbsrtowcs(d,s,m,ps);
+
+    // No warning is expected
+    (void)mbsrtowcs(d,s,m,p);
 }
 
 void uninitvar_wctob(void)
@@ -2820,6 +2897,10 @@ void uninitvar_scanf(void)
     char str[42];
     // cppcheck-suppress uninitvar
     (void)scanf(format, str);
+
+    // no warning is expected (#9347)
+    int i;
+    sscanf("0", "%d", &i);
 }
 
 void uninitvar_vsscanf(void)

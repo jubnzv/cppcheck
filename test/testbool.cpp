@@ -53,6 +53,8 @@ private:
         TEST_CASE(comparisonOfBoolWithInt5);
         TEST_CASE(comparisonOfBoolWithInt6); // #4224 - integer is casted to bool
         TEST_CASE(comparisonOfBoolWithInt7); // #4846 - (!x == true)
+        TEST_CASE(comparisonOfBoolWithInt8); // #9165
+        TEST_CASE(comparisonOfBoolWithInt9); // #9304
 
         TEST_CASE(checkComparisonOfFuncReturningBool1);
         TEST_CASE(checkComparisonOfFuncReturningBool2);
@@ -208,6 +210,15 @@ private:
               "void f() {\n"
               "    S s = {0};\n"
               "    s.p = true;\n"
+              "}\n");
+        ASSERT_EQUALS("[test.cpp:6]: (style) Boolean value assigned to floating point variable.\n", errout.str());
+
+        check("struct S {\n"
+              "    float* p[1];\n"
+              "};\n"
+              "void f() {\n"
+              "    S s = {0};\n"
+              "    *s.p[0] = true;\n"
               "}\n");
         ASSERT_EQUALS("[test.cpp:6]: (style) Boolean value assigned to floating point variable.\n", errout.str());
     }
@@ -774,56 +785,61 @@ private:
         check("void f(_Bool a, _Bool b) {\n"
               "    if(a & b) {}\n"
               "}");
-        ASSERT_EQUALS("[test.cpp:2]: (style, inconclusive) Boolean variable 'a' is used in bitwise operation. Did you mean '&&'?\n", errout.str());
+        ASSERT_EQUALS("[test.cpp:2]: (style, inconclusive) Boolean expression 'a' is used in bitwise operation. Did you mean '&&'?\n", errout.str());
 
         check("void f(_Bool a, _Bool b) {\n"
               "    if(a | b) {}\n"
               "}");
-        ASSERT_EQUALS("[test.cpp:2]: (style, inconclusive) Boolean variable 'a' is used in bitwise operation. Did you mean '||'?\n", errout.str());
+        ASSERT_EQUALS("[test.cpp:2]: (style, inconclusive) Boolean expression 'a' is used in bitwise operation. Did you mean '||'?\n", errout.str());
 
         check("void f(bool a, bool b) {\n"
               "    if(a & !b) {}\n"
               "}");
-        ASSERT_EQUALS("[test.cpp:2]: (style, inconclusive) Boolean variable 'a' is used in bitwise operation. Did you mean '&&'?\n", errout.str());
+        ASSERT_EQUALS("[test.cpp:2]: (style, inconclusive) Boolean expression 'a' is used in bitwise operation. Did you mean '&&'?\n", errout.str());
 
         check("void f(bool a, bool b) {\n"
               "    if(a | !b) {}\n"
               "}");
-        ASSERT_EQUALS("[test.cpp:2]: (style, inconclusive) Boolean variable 'a' is used in bitwise operation. Did you mean '||'?\n", errout.str());
+        ASSERT_EQUALS("[test.cpp:2]: (style, inconclusive) Boolean expression 'a' is used in bitwise operation. Did you mean '||'?\n", errout.str());
 
         check("bool a, b;\n"
               "void f() {\n"
               "    if(a & b) {}\n"
               "}");
-        ASSERT_EQUALS("[test.cpp:3]: (style, inconclusive) Boolean variable 'a' is used in bitwise operation. Did you mean '&&'?\n", errout.str());
+        ASSERT_EQUALS("[test.cpp:3]: (style, inconclusive) Boolean expression 'a' is used in bitwise operation. Did you mean '&&'?\n", errout.str());
 
         check("bool a, b;\n"
               "void f() {\n"
               "    if(a & !b) {}\n"
               "}");
-        ASSERT_EQUALS("[test.cpp:3]: (style, inconclusive) Boolean variable 'a' is used in bitwise operation. Did you mean '&&'?\n", errout.str());
+        ASSERT_EQUALS("[test.cpp:3]: (style, inconclusive) Boolean expression 'a' is used in bitwise operation. Did you mean '&&'?\n", errout.str());
 
         check("bool a, b;\n"
               "void f() {\n"
               "    if(a | b) {}\n"
               "}");
-        ASSERT_EQUALS("[test.cpp:3]: (style, inconclusive) Boolean variable 'a' is used in bitwise operation. Did you mean '||'?\n", errout.str());
+        ASSERT_EQUALS("[test.cpp:3]: (style, inconclusive) Boolean expression 'a' is used in bitwise operation. Did you mean '||'?\n", errout.str());
 
         check("bool a, b;\n"
               "void f() {\n"
               "    if(a | !b) {}\n"
               "}");
-        ASSERT_EQUALS("[test.cpp:3]: (style, inconclusive) Boolean variable 'a' is used in bitwise operation. Did you mean '||'?\n", errout.str());
+        ASSERT_EQUALS("[test.cpp:3]: (style, inconclusive) Boolean expression 'a' is used in bitwise operation. Did you mean '||'?\n", errout.str());
 
         check("void f(bool a, int b) {\n"
               "    if(a & b) {}\n"
               "}");
-        ASSERT_EQUALS("[test.cpp:2]: (style, inconclusive) Boolean variable 'a' is used in bitwise operation. Did you mean '&&'?\n", errout.str());
+        ASSERT_EQUALS("[test.cpp:2]: (style, inconclusive) Boolean expression 'a' is used in bitwise operation. Did you mean '&&'?\n", errout.str());
 
         check("void f(int a, bool b) {\n"
               "    if(a & b) {}\n"
               "}");
-        ASSERT_EQUALS("[test.cpp:2]: (style, inconclusive) Boolean variable 'b' is used in bitwise operation. Did you mean '&&'?\n", errout.str());
+        ASSERT_EQUALS("[test.cpp:2]: (style, inconclusive) Boolean expression 'b' is used in bitwise operation. Did you mean '&&'?\n", errout.str());
+
+        check("void f(int a, int b) {\n"
+              "    if((a > 0) & (b < 0)) {}\n"
+              "}");
+        ASSERT_EQUALS("[test.cpp:2]: (style, inconclusive) Boolean expression 'a>0' is used in bitwise operation. Did you mean '&&'?\n", errout.str());
 
         check("void f(int a, int b) {\n"
               "    if(a & b) {}\n"
@@ -843,6 +859,16 @@ private:
 
         check("void f(bool test){\n"
               "    test++;\n"
+              "}");
+        ASSERT_EQUALS("[test.cpp:2]: (style) Incrementing a variable of type 'bool' with postfix operator++ is deprecated by the C++ Standard. You should assign it the value 'true' instead.\n", errout.str());
+
+        check("void f(bool* test){\n"
+              "    (*test)++;\n"
+              "}");
+        ASSERT_EQUALS("[test.cpp:2]: (style) Incrementing a variable of type 'bool' with postfix operator++ is deprecated by the C++ Standard. You should assign it the value 'true' instead.\n", errout.str());
+
+        check("void f(bool* test){\n"
+              "    test[0]++;\n"
               "}");
         ASSERT_EQUALS("[test.cpp:2]: (style) Incrementing a variable of type 'bool' with postfix operator++ is deprecated by the C++ Standard. You should assign it the value 'true' instead.\n", errout.str());
 
@@ -994,6 +1020,60 @@ private:
               "}");
         ASSERT_EQUALS("", errout.str());
     }
+
+    void comparisonOfBoolWithInt8() { // #9165
+        check("bool Fun();\n"
+              "void Test(bool expectedResult) {\n"
+              "    auto res = Fun();\n"
+              "    if (expectedResult == res)\n"
+              "        throw 2;\n"
+              "}");
+        ASSERT_EQUALS("", errout.str());
+
+        check("int Fun();\n"
+              "void Test(bool expectedResult) {\n"
+              "    auto res = Fun();\n"
+              "    if (expectedResult == res)\n"
+              "        throw 2;\n"
+              "}");
+        ASSERT_EQUALS("[test.cpp:4]: (warning) Comparison of a boolean expression with an integer.\n", errout.str());
+
+        check("bool Fun();\n"
+              "void Test(bool expectedResult) {\n"
+              "    auto res = Fun();\n"
+              "    if (5 + expectedResult == res)\n"
+              "        throw 2;\n"
+              "}");
+        ASSERT_EQUALS("[test.cpp:4]: (warning) Comparison of a boolean expression with an integer.\n", errout.str());
+
+        check("int Fun();\n"
+              "void Test(bool expectedResult) {\n"
+              "    auto res = Fun();\n"
+              "    if (5 + expectedResult == res)\n"
+              "        throw 2;\n"
+              "}");
+        ASSERT_EQUALS("", errout.str());
+
+        check("int Fun();\n"
+              "void Test(bool expectedResult) {\n"
+              "    auto res = Fun();\n"
+              "    if (expectedResult == res + 5)\n"
+              "        throw 2;\n"
+              "}");
+        ASSERT_EQUALS("[test.cpp:4]: (warning) Comparison of a boolean expression with an integer.\n", errout.str());
+    }
+
+    void comparisonOfBoolWithInt9() { // #9304
+        check("bool f(int a, bool b)\n"
+              "{\n"
+              "    if ((a == 0 ? false : true) != b) {\n"
+              "        b = !b;\n"
+              "    }\n"
+              "    return b;\n"
+              "}");
+        ASSERT_EQUALS("", errout.str());
+    }
+
 
     void pointerArithBool1() { // #5126
         check("void f(char *p) {\n"

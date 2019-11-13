@@ -32,8 +32,9 @@ static const char ATTR_CALL_ARGEXPR[] = "call-argexpr";
 static const char ATTR_CALL_ARGVALUETYPE[] = "call-argvaluetype";
 static const char ATTR_CALL_ARGVALUE[] = "call-argvalue";
 static const char ATTR_WARNING[] = "warning";
-static const char ATTR_LOC_FILENAME[] = "filename";
-static const char ATTR_LOC_LINENR[] = "linenr";
+static const char ATTR_LOC_FILENAME[] = "file";
+static const char ATTR_LOC_LINENR[] = "line";
+static const char ATTR_LOC_COLUMN[] = "col";
 static const char ATTR_INFO[] = "info";
 static const char ATTR_MY_ID[] = "my-id";
 static const char ATTR_MY_ARGNR[] = "my-argnr";
@@ -44,12 +45,13 @@ int CTU::maxCtuDepth = 2;
 
 std::string CTU::getFunctionId(const Tokenizer *tokenizer, const Function *function)
 {
-    return tokenizer->list.file(function->tokenDef) + ':' + MathLib::toString(function->tokenDef->linenr()) + ':' + MathLib::toString(function->tokenDef->col());
+    return tokenizer->list.file(function->tokenDef) + ':' + MathLib::toString(function->tokenDef->linenr()) + ':' + MathLib::toString(function->tokenDef->column());
 }
 
 CTU::FileInfo::Location::Location(const Tokenizer *tokenizer, const Token *tok)
     : fileName(tokenizer->list.file(tok))
-    , linenr(tok->linenr())
+    , lineNumber(tok->linenr())
+    , column(tok->column())
 {
 }
 
@@ -77,7 +79,8 @@ std::string CTU::FileInfo::CallBase::toBaseXmlString() const
         << " " << ATTR_CALL_FUNCNAME << "=\"" << callFunctionName << "\""
         << " " << ATTR_CALL_ARGNR << "=\"" << callArgNr << "\""
         << " " << ATTR_LOC_FILENAME << "=\"" << location.fileName << "\""
-        << " " << ATTR_LOC_LINENR << "=\"" << location.linenr << "\"";
+        << " " << ATTR_LOC_LINENR << "=\"" << location.lineNumber << "\""
+        << " " << ATTR_LOC_COLUMN << "=\"" << location.column << "\"";
     return out.str();
 }
 
@@ -99,6 +102,7 @@ std::string CTU::FileInfo::FunctionCall::toXmlString() const
             out << "  <path"
                 << " " << ATTR_LOC_FILENAME << "=\"" << loc.getfile() << "\""
                 << " " << ATTR_LOC_LINENR << "=\"" << loc.line << "\""
+                << " " << ATTR_LOC_COLUMN << "=\"" << loc.column << "\""
                 << " " << ATTR_INFO << "=\"" << loc.getinfo() << "\"/>\n";
         out << "</function-call>";
     }
@@ -124,7 +128,8 @@ std::string CTU::FileInfo::UnsafeUsage::toString() const
         << " " << ATTR_MY_ARGNR << "=\"" << myArgNr << '\"'
         << " " << ATTR_MY_ARGNAME << "=\"" << myArgumentName << '\"'
         << " " << ATTR_LOC_FILENAME << "=\"" << location.fileName << '\"'
-        << " " << ATTR_LOC_LINENR << "=\"" << location.linenr << '\"'
+        << " " << ATTR_LOC_LINENR << "=\"" << location.lineNumber << '\"'
+        << " " << ATTR_LOC_COLUMN << "=\"" << location.column << '\"'
         << " " << ATTR_VALUE << "=\"" << value << "\""
         << "/>\n";
     return out.str();
@@ -176,7 +181,8 @@ bool CTU::FileInfo::CallBase::loadBaseFromXml(const tinyxml2::XMLElement *xmlEle
     callFunctionName = readAttrString(xmlElement, ATTR_CALL_FUNCNAME, &error);
     callArgNr = readAttrInt(xmlElement, ATTR_CALL_ARGNR, &error);
     location.fileName = readAttrString(xmlElement, ATTR_LOC_FILENAME, &error);
-    location.linenr = readAttrInt(xmlElement, ATTR_LOC_LINENR, &error);
+    location.lineNumber = readAttrInt(xmlElement, ATTR_LOC_LINENR, &error);
+    location.column = readAttrInt(xmlElement, ATTR_LOC_COLUMN, &error);
     return !error;
 }
 
@@ -196,6 +202,7 @@ bool CTU::FileInfo::FunctionCall::loadFromXml(const tinyxml2::XMLElement *xmlEle
         ErrorLogger::ErrorMessage::FileLocation loc;
         loc.setfile(readAttrString(e2, ATTR_LOC_FILENAME, &error));
         loc.line = readAttrInt(e2, ATTR_LOC_LINENR, &error);
+        loc.column = readAttrInt(e2, ATTR_LOC_COLUMN, &error);
         loc.setinfo(readAttrString(e2, ATTR_INFO, &error));
     }
     return !error;
@@ -248,7 +255,8 @@ std::list<CTU::FileInfo::UnsafeUsage> CTU::loadUnsafeUsageListFromXml(const tiny
         unsafeUsage.myArgNr = readAttrInt(e, ATTR_MY_ARGNR, &error);
         unsafeUsage.myArgumentName = readAttrString(e, ATTR_MY_ARGNAME, &error);
         unsafeUsage.location.fileName = readAttrString(e, ATTR_LOC_FILENAME, &error);
-        unsafeUsage.location.linenr = readAttrInt(e, ATTR_LOC_LINENR, &error);
+        unsafeUsage.location.lineNumber = readAttrInt(e, ATTR_LOC_LINENR, &error);
+        unsafeUsage.location.column = readAttrInt(e, ATTR_LOC_COLUMN, &error);
         unsafeUsage.value = readAttrInt(e, ATTR_VALUE, &error);
 
         if (!error)
@@ -313,12 +321,14 @@ CTU::FileInfo *CTU::getFileInfo(const Tokenizer *tokenizer)
                 for (const ValueFlow::Value &value : argtok->values()) {
                     if ((!value.isIntValue() || value.intvalue != 0 || value.isInconclusive()) && !value.isBufferSizeValue())
                         continue;
+                    // Skip impossible values since they cannot be represented
+                    if (value.isImpossible())
+                        continue;
                     FileInfo::FunctionCall functionCall;
                     functionCall.callValueType = value.valueType;
                     functionCall.callId = getFunctionId(tokenizer, tok->astOperand1()->function());
                     functionCall.callFunctionName = tok->astOperand1()->expressionString();
-                    functionCall.location.fileName = tokenizer->list.file(tok);
-                    functionCall.location.linenr = tok->linenr();
+                    functionCall.location = FileInfo::Location(tokenizer,tok);
                     functionCall.callArgNr = argnr + 1;
                     functionCall.callArgumentExpression = argtok->expressionString();
                     functionCall.callArgValue = value.intvalue;
@@ -327,6 +337,7 @@ CTU::FileInfo *CTU::getFileInfo(const Tokenizer *tokenizer)
                         ErrorLogger::ErrorMessage::FileLocation loc;
                         loc.setfile(tokenizer->list.file(i.first));
                         loc.line = i.first->linenr();
+                        loc.column = i.first->column();
                         loc.setinfo(i.second);
                         functionCall.callValuePath.push_back(loc);
                     }
@@ -338,8 +349,7 @@ CTU::FileInfo *CTU::getFileInfo(const Tokenizer *tokenizer)
                     functionCall.callValueType = ValueFlow::Value::ValueType::BUFFER_SIZE;
                     functionCall.callId = getFunctionId(tokenizer, tok->astOperand1()->function());
                     functionCall.callFunctionName = tok->astOperand1()->expressionString();
-                    functionCall.location.fileName = tokenizer->list.file(tok);
-                    functionCall.location.linenr = tok->linenr();
+                    functionCall.location = FileInfo::Location(tokenizer, tok);
                     functionCall.callArgNr = argnr + 1;
                     functionCall.callArgumentExpression = argtok->expressionString();
                     functionCall.callArgValue = argtok->variable()->dimension(0) * argtok->valueType()->typeSize(*tokenizer->getSettings());
@@ -352,8 +362,7 @@ CTU::FileInfo *CTU::getFileInfo(const Tokenizer *tokenizer)
                     functionCall.callValueType = ValueFlow::Value::ValueType::BUFFER_SIZE;
                     functionCall.callId = getFunctionId(tokenizer, tok->astOperand1()->function());
                     functionCall.callFunctionName = tok->astOperand1()->expressionString();
-                    functionCall.location.fileName = tokenizer->list.file(tok);
-                    functionCall.location.linenr = tok->linenr();
+                    functionCall.location = FileInfo::Location(tokenizer, tok);
                     functionCall.callArgNr = argnr + 1;
                     functionCall.callArgumentExpression = argtok->expressionString();
                     functionCall.callArgValue = argtok->astOperand1()->valueType()->typeSize(*tokenizer->getSettings());
@@ -369,13 +378,12 @@ CTU::FileInfo *CTU::getFileInfo(const Tokenizer *tokenizer)
                 if (argtok->values().size() != 1U)
                     continue;
                 const ValueFlow::Value &v = argtok->values().front();
-                if (v.valueType == ValueFlow::Value::UNINIT && !v.isInconclusive()) {
+                if (v.valueType == ValueFlow::Value::ValueType::UNINIT && !v.isInconclusive()) {
                     FileInfo::FunctionCall functionCall;
-                    functionCall.callValueType = ValueFlow::Value::UNINIT;
+                    functionCall.callValueType = ValueFlow::Value::ValueType::UNINIT;
                     functionCall.callId = getFunctionId(tokenizer, tok->astOperand1()->function());
                     functionCall.callFunctionName = tok->astOperand1()->expressionString();
-                    functionCall.location.fileName = tokenizer->list.file(tok);
-                    functionCall.location.linenr = tok->linenr();
+                    functionCall.location = FileInfo::Location(tokenizer, tok);
                     functionCall.callArgNr = argnr + 1;
                     functionCall.callArgValue = 0;
                     functionCall.callArgumentExpression = argtok->expressionString();
@@ -457,7 +465,7 @@ std::list<CTU::FileInfo::UnsafeUsage> CTU::getUnsafeUsage(const Tokenizer *token
 }
 
 static bool findPath(const std::string &callId,
-                     unsigned int callArgNr,
+                     nonneg int callArgNr,
                      MathLib::bigint unsafeValue,
                      CTU::FileInfo::InvalidValueType invalidValue,
                      const std::map<std::string, std::list<const CTU::FileInfo::CallBase *>> &callsMap,
@@ -482,15 +490,15 @@ static bool findPath(const std::string &callId,
                 continue;
             switch (invalidValue) {
             case CTU::FileInfo::InvalidValueType::null:
-                if (functionCall->callValueType != ValueFlow::Value::INT || functionCall->callArgValue != 0)
+                if (functionCall->callValueType != ValueFlow::Value::ValueType::INT || functionCall->callArgValue != 0)
                     continue;
                 break;
             case CTU::FileInfo::InvalidValueType::uninit:
-                if (functionCall->callValueType != ValueFlow::Value::UNINIT)
+                if (functionCall->callValueType != ValueFlow::Value::ValueType::UNINIT)
                     continue;
                 break;
             case CTU::FileInfo::InvalidValueType::bufferOverflow:
-                if (functionCall->callValueType != ValueFlow::Value::BUFFER_SIZE)
+                if (functionCall->callValueType != ValueFlow::Value::ValueType::BUFFER_SIZE)
                     continue;
                 if (unsafeValue < 0 || unsafeValue >= functionCall->callArgValue)
                     break;
@@ -522,7 +530,7 @@ std::list<ErrorLogger::ErrorMessage::FileLocation> CTU::FileInfo::getErrorPath(I
 {
     std::list<ErrorLogger::ErrorMessage::FileLocation> locationList;
 
-    const CTU::FileInfo::CallBase *path[10] = {0};
+    const CTU::FileInfo::CallBase *path[10] = {nullptr};
 
     if (!findPath(unsafeUsage.myId, unsafeUsage.myArgNr, unsafeUsage.value, invalidValue, callsMap, path, 0, warning))
         return locationList;
@@ -541,16 +549,12 @@ std::list<ErrorLogger::ErrorMessage::FileLocation> CTU::FileInfo::getErrorPath(I
             std::copy(functionCall->callValuePath.cbegin(), functionCall->callValuePath.cend(), std::back_inserter(locationList));
         }
 
-        ErrorLogger::ErrorMessage::FileLocation fileLoc;
-        fileLoc.setfile(path[index]->location.fileName);
-        fileLoc.line = path[index]->location.linenr;
+        ErrorLogger::ErrorMessage::FileLocation fileLoc(path[index]->location.fileName, path[index]->location.lineNumber, path[index]->location.column);
         fileLoc.setinfo("Calling function " + path[index]->callFunctionName + ", " + MathLib::toString(path[index]->callArgNr) + getOrdinalText(path[index]->callArgNr) + " argument is " + value1);
         locationList.push_back(fileLoc);
     }
 
-    ErrorLogger::ErrorMessage::FileLocation fileLoc2;
-    fileLoc2.setfile(unsafeUsage.location.fileName);
-    fileLoc2.line = unsafeUsage.location.linenr;
+    ErrorLogger::ErrorMessage::FileLocation fileLoc2(unsafeUsage.location.fileName, unsafeUsage.location.lineNumber, unsafeUsage.location.column);
     fileLoc2.setinfo(replaceStr(info, "ARG", unsafeUsage.myArgumentName));
     locationList.push_back(fileLoc2);
 

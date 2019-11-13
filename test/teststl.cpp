@@ -156,6 +156,8 @@ private:
         TEST_CASE(loopAlgoIncrement);
         TEST_CASE(loopAlgoConditional);
         TEST_CASE(loopAlgoMinMax);
+
+        TEST_CASE(invalidContainer);
         TEST_CASE(findInsert);
     }
 
@@ -287,6 +289,44 @@ private:
                     "  x = s.begin() + x;\n"
                     "}\n");
         ASSERT_EQUALS("test.cpp:3:error:Out of bounds access in expression 's.begin()+x' because 's' is empty and 'x' may be non-zero.\n", errout.str());
+
+        checkNormal("char fstr1(){const std::string s = \"<a><b>\"; return s[42]; }\n"
+                    "wchar_t fwstr1(){const std::wstring s = L\"<a><b>\"; return s[42]; }\n");
+        ASSERT_EQUALS("test.cpp:1:error:Out of bounds access in 's[42]', if 's' size is 6 and '42' is 42\n"
+                      "test.cpp:2:error:Out of bounds access in 's[42]', if 's' size is 6 and '42' is 42\n", errout.str());
+
+        checkNormal("char fstr1(){const std::string s = \"<a><b>\"; return s[1]; }\n"
+                    "wchar_t fwstr1(){const std::wstring s = L\"<a><b>\"; return s[1]; }\n");
+        ASSERT_EQUALS("", errout.str());
+
+        checkNormal("int f() {\n"
+                    "    std::vector<int> v;\n"
+                    "    std::vector<int> * pv = &v;\n"
+                    "    return (*pv)[42];\n"
+                    "}\n");
+        ASSERT_EQUALS("test.cpp:4:error:Out of bounds access in expression '(*pv)[42]' because '*pv' is empty.\n", errout.str());
+
+        checkNormal("void f() {\n"
+                    "  std::string s;\n"
+                    "  ++abc[s];\n"
+                    "}");
+        ASSERT_EQUALS("", errout.str());
+
+        // # 9274
+        checkNormal("char f(bool b) {\n"
+                    "    const std::string s = \"<a><b>\";\n"
+                    "    int x = 6;\n"
+                    "    if(b) ++x;\n"
+                    "    return s[x];\n"
+                    "}\n");
+        ASSERT_EQUALS("test.cpp:5:error:Out of bounds access in 's[x]', if 's' size is 6 and 'x' is 6\n", errout.str());
+
+        checkNormal("void f() {\n"
+                    "    static const int N = 4;\n"
+                    "    std::array<int, N> x;\n"
+                    "    x[0] = 0;\n"
+                    "}\n");
+        ASSERT_EQUALS("", errout.str());
     }
 
     void outOfBoundsIndexExpression() {
@@ -1148,8 +1188,8 @@ private:
               "    iter = ints.begin() + 2;\n"
               "    ints.erase(iter);\n"
               "    std::cout << (*iter) << std::endl;\n"
-              "}");
-        ASSERT_EQUALS("[test.cpp:7] -> [test.cpp:6]: (error) Iterator 'iter' used after element has been erased.\n", errout.str());
+              "}", true);
+        TODO_ASSERT_EQUALS("[test.cpp:5] -> [test.cpp:6] -> [test.cpp:3] -> [test.cpp:7]: (error) Using iterator to local container 'ints' that may be invalid.\n", "[test.cpp:5] -> [test.cpp:6] -> [test.cpp:3] -> [test.cpp:7]: (error, inconclusive) Using iterator to local container 'ints' that may be invalid.\n", errout.str());
 
         // #6554 "False positive eraseDereference - erase in while() loop"
         check("typedef std::map<Packet> packetMap;\n"
@@ -1219,8 +1259,8 @@ private:
               "    auto iter = ints.begin() + 2;\n"
               "    ints.erase(iter);\n"
               "    std::cout << (*iter) << std::endl;\n"
-              "}");
-        ASSERT_EQUALS("[test.cpp:6] -> [test.cpp:5]: (error) Iterator 'iter' used after element has been erased.\n", errout.str());
+              "}", true);
+        TODO_ASSERT_EQUALS("[test.cpp:4] -> [test.cpp:5] -> [test.cpp:3] -> [test.cpp:6]: (error) Using iterator to local container 'ints' that may be invalid.\n", "[test.cpp:4] -> [test.cpp:5] -> [test.cpp:3] -> [test.cpp:6]: (error, inconclusive) Using iterator to local container 'ints' that may be invalid.\n", errout.str());
 
         check("void f() {\n"
               "    auto x = *myList.begin();\n"
@@ -1361,6 +1401,14 @@ private:
               "  v[-11] = 123;\n"
               "}");
         ASSERT_EQUALS("[test.cpp:2]: (error) Array index -11 is out of bounds.\n", errout.str());
+
+        check("int f(int x, const std::vector<int>& a) {\n"
+              "    if (!(x < 5))\n"
+              "        return a[x - 5];\n"
+              "    else\n"
+              "        return a[4 - x];\n"
+              "}\n");
+        ASSERT_EQUALS("", errout.str());
     }
 
 
@@ -1631,7 +1679,7 @@ private:
               "        }\n"
               "    }\n"
               "}");
-        ASSERT_EQUALS("[test.cpp:5] -> [test.cpp:9]: (error) Iterator 'it' used after element has been erased.\n", errout.str());
+        ASSERT_EQUALS("[test.cpp:5] -> [test.cpp:7] -> [test.cpp:8] -> [test.cpp:8] -> [test.cpp:7] -> [test.cpp:5] -> [test.cpp:9] -> [test.cpp:3] -> [test.cpp:5]: (error) Using iterator to local container 'foo' that may be invalid.\n", errout.str());
     }
 
     void eraseGoto() {
@@ -1718,8 +1766,8 @@ private:
               "    iter = ints.begin() + 2;\n"
               "    ints.erase(iter);\n"
               "    ints.erase(iter);\n"
-              "}");
-        ASSERT_EQUALS("[test.cpp:6]: (error) Invalid iterator: iter\n", errout.str());
+              "}", true);
+        TODO_ASSERT_EQUALS("[test.cpp:1] -> [test.cpp:4] -> [test.cpp:5] -> [test.cpp:1] -> [test.cpp:6]: (error) Using iterator to local container 'ints' that may be invalid.\n", "[test.cpp:1] -> [test.cpp:4] -> [test.cpp:5] -> [test.cpp:1] -> [test.cpp:6]: (error, inconclusive) Using iterator to local container 'ints' that may be invalid.\n", errout.str());
     }
 
     void eraseByValue() {
@@ -1757,15 +1805,15 @@ private:
         ASSERT_EQUALS("", errout.str());
 
         check("void f(const std::list<int>& m_ImplementationMap) {\n"
-              "    std::list<int>::iterator aIt = m_ImplementationMap.find( xEle );\n"
+              "    std::list<int>::iterator aIt = m_ImplementationMap.begin();\n"
               "    m_ImplementationMap.erase(*aIt);\n"
               "    m_ImplementationMap.erase(aIt);\n"
               "}");
         ASSERT_EQUALS("[test.cpp:4]: (error) Invalid iterator: aIt\n", errout.str());
 
         check("void f(const std::list<int>& m_ImplementationMap) {\n"
-              "    std::list<int>::iterator aIt = m_ImplementationMap.find( xEle1 );\n"
-              "    std::list<int>::iterator bIt = m_ImplementationMap.find( xEle2 );\n"
+              "    std::list<int>::iterator aIt = m_ImplementationMap.begin();\n"
+              "    std::list<int>::iterator bIt = m_ImplementationMap.begin();\n"
               "    m_ImplementationMap.erase(*bIt);\n"
               "    m_ImplementationMap.erase(aIt);\n"
               "}");
@@ -1788,26 +1836,26 @@ private:
 
     void eraseOnVector() {
         check("void f(const std::vector<int>& m_ImplementationMap) {\n"
-              "    std::vector<int>::iterator aIt = m_ImplementationMap.find( xEle );\n"
+              "    std::vector<int>::iterator aIt = m_ImplementationMap.begin();\n"
               "    m_ImplementationMap.erase(something(unknown));\n" // All iterators become invalidated when erasing from std::vector
               "    m_ImplementationMap.erase(aIt);\n"
               "}");
-        ASSERT_EQUALS("[test.cpp:4]: (error) After erase(), the iterator 'aIt' may be invalid.\n", errout.str());
+        ASSERT_EQUALS("[test.cpp:1] -> [test.cpp:2] -> [test.cpp:3] -> [test.cpp:1] -> [test.cpp:4]: (error) Using iterator to local container 'm_ImplementationMap' that may be invalid.\n", errout.str());
 
         check("void f(const std::vector<int>& m_ImplementationMap) {\n"
-              "    std::vector<int>::iterator aIt = m_ImplementationMap.find( xEle );\n"
+              "    std::vector<int>::iterator aIt = m_ImplementationMap.begin();\n"
               "    m_ImplementationMap.erase(*aIt);\n" // All iterators become invalidated when erasing from std::vector
               "    m_ImplementationMap.erase(aIt);\n"
               "}");
-        ASSERT_EQUALS("[test.cpp:4]: (error) Invalid iterator: aIt\n", errout.str());
+        ASSERT_EQUALS("[test.cpp:1] -> [test.cpp:2] -> [test.cpp:3] -> [test.cpp:1] -> [test.cpp:4]: (error) Using iterator to local container 'm_ImplementationMap' that may be invalid.\n", errout.str());
 
         check("void f(const std::vector<int>& m_ImplementationMap) {\n"
-              "    std::vector<int>::iterator aIt = m_ImplementationMap.find( xEle1 );\n"
-              "    std::vector<int>::iterator bIt = m_ImplementationMap.find( xEle2 );\n"
+              "    std::vector<int>::iterator aIt = m_ImplementationMap.begin();\n"
+              "    std::vector<int>::iterator bIt = m_ImplementationMap.begin();\n"
               "    m_ImplementationMap.erase(*bIt);\n" // All iterators become invalidated when erasing from std::vector
               "    aIt = m_ImplementationMap.erase(aIt);\n"
               "}");
-        ASSERT_EQUALS("[test.cpp:5]: (error) After erase(), the iterator 'aIt' may be invalid.\n", errout.str());
+        ASSERT_EQUALS("[test.cpp:1] -> [test.cpp:2] -> [test.cpp:4] -> [test.cpp:1] -> [test.cpp:5]: (error) Using iterator to local container 'm_ImplementationMap' that may be invalid.\n", errout.str());
     }
 
     void pushback1() {
@@ -1817,7 +1865,7 @@ private:
               "    foo.push_back(123);\n"
               "    *it;\n"
               "}");
-        ASSERT_EQUALS("[test.cpp:5]: (error) After push_back(), the iterator 'it' may be invalid.\n", errout.str());
+        ASSERT_EQUALS("[test.cpp:1] -> [test.cpp:3] -> [test.cpp:4] -> [test.cpp:1] -> [test.cpp:5]: (error) Using iterator to local container 'foo' that may be invalid.\n", errout.str());
     }
 
     void pushback2() {
@@ -1844,7 +1892,7 @@ private:
               "        foo.push_back(123);\n"
               "    }\n"
               "}");
-        ASSERT_EQUALS("[test.cpp:8]: (error) After push_back(), the iterator 'it' may be invalid.\n", errout.str());
+        ASSERT_EQUALS("[test.cpp:6] -> [test.cpp:6] -> [test.cpp:8] -> [test.cpp:3] -> [test.cpp:6]: (error) Using iterator to local container 'foo' that may be invalid.\n", errout.str());
     }
 
     void pushback4() {
@@ -1856,7 +1904,7 @@ private:
               "    ints.push_back(2);\n"
               "    *first;\n"
               "}");
-        ASSERT_EQUALS("[test.cpp:7]: (error) Invalid pointer 'first' after push_back().\n", errout.str());
+        ASSERT_EQUALS("[test.cpp:5] -> [test.cpp:6] -> [test.cpp:3] -> [test.cpp:7]: (error) Using pointer to local variable 'ints' that may be invalid.\n", errout.str());
     }
 
     void pushback5() {
@@ -1880,16 +1928,16 @@ private:
         // ticket #735
         check("void f()\n"
               "{\n"
-              "    vector<int> v;\n"
+              "    std::vector<int> v;\n"
               "    v.push_back(1);\n"
               "    v.push_back(2);\n"
-              "    for (vector<int>::iterator it = v.begin(); it != v.end(); ++it)\n"
+              "    for (std::vector<int>::iterator it = v.begin(); it != v.end(); ++it)\n"
               "    {\n"
               "        if (*it == 1)\n"
               "            v.push_back(10);\n"
               "    }\n"
               "}");
-        ASSERT_EQUALS("[test.cpp:9]: (error) After push_back(), the iterator 'it' may be invalid.\n", errout.str());
+        ASSERT_EQUALS("[test.cpp:6] -> [test.cpp:8] -> [test.cpp:8] -> [test.cpp:6] -> [test.cpp:9] -> [test.cpp:3] -> [test.cpp:6]: (error) Using iterator to local container 'v' that may be invalid.\n", errout.str());
 
         check("void f()\n"
               "{\n"
@@ -1902,7 +1950,7 @@ private:
               "            v.push_back(10);\n"
               "    }\n"
               "}");
-        ASSERT_EQUALS("[test.cpp:9]: (error) After push_back(), the iterator 'it' may be invalid.\n", errout.str());
+        ASSERT_EQUALS("[test.cpp:6] -> [test.cpp:8] -> [test.cpp:8] -> [test.cpp:6] -> [test.cpp:9] -> [test.cpp:3] -> [test.cpp:6]: (error) Using iterator to local container 'v' that may be invalid.\n", errout.str());
     }
 
     void pushback7() {
@@ -1916,7 +1964,7 @@ private:
               "        foo.push_back(123);\n"
               "    }\n"
               "}");
-        ASSERT_EQUALS("[test.cpp:8]: (error) After push_back(), the iterator 'it' may be invalid.\n", errout.str());
+        ASSERT_EQUALS("[test.cpp:6] -> [test.cpp:6] -> [test.cpp:8] -> [test.cpp:3] -> [test.cpp:6]: (error) Using iterator to local container 'foo' that may be invalid.\n", errout.str());
     }
 
     void pushback8() {
@@ -1932,7 +1980,7 @@ private:
               "        sum += *it;\n"
               "    }\n"
               "}");
-        ASSERT_EQUALS("[test.cpp:8]: (error) After push_back(), the iterator 'end' may be invalid.\n", errout.str());
+        ASSERT_EQUALS("[test.cpp:4] -> [test.cpp:5] -> [test.cpp:3] -> [test.cpp:8]: (error) Using iterator to local container 'ints' that may be invalid.\n", errout.str());
     }
 
     void pushback9() {
@@ -1962,7 +2010,7 @@ private:
               "    foo.reserve(100);\n"
               "    *it = 0;\n"
               "}");
-        ASSERT_EQUALS("[test.cpp:5]: (error) After reserve(), the iterator 'it' may be invalid.\n", errout.str());
+        ASSERT_EQUALS("[test.cpp:1] -> [test.cpp:3] -> [test.cpp:4] -> [test.cpp:1] -> [test.cpp:5]: (error) Using iterator to local container 'foo' that may be invalid.\n", errout.str());
 
         // in loop
         check("void f()\n"
@@ -1975,7 +2023,7 @@ private:
               "        foo.reserve(123);\n"
               "    }\n"
               "}");
-        ASSERT_EQUALS("[test.cpp:8]: (error) After reserve(), the iterator 'it' may be invalid.\n", errout.str());
+        ASSERT_EQUALS("[test.cpp:6] -> [test.cpp:6] -> [test.cpp:8] -> [test.cpp:3] -> [test.cpp:6]: (error) Using iterator to local container 'foo' that may be invalid.\n", errout.str());
     }
 
     void pushback11() {
@@ -2005,8 +2053,7 @@ private:
               "        *it;\n"
               "    }\n"
               "}");
-        ASSERT_EQUALS("[test.cpp:6]: (error) After insert(), the iterator 'it' may be invalid.\n"
-                      "[test.cpp:9]: (error) After insert(), the iterator 'it' may be invalid.\n", errout.str());
+        ASSERT_EQUALS("[test.cpp:4] -> [test.cpp:4] -> [test.cpp:6] -> [test.cpp:3] -> [test.cpp:4]: (error) Using iterator to local container 'vec' that may be invalid.\n", errout.str());
     }
 
     void pushback13() {
@@ -2026,7 +2073,7 @@ private:
               "    ints.insert(ints.begin(), 1);\n"
               "    ++iter;\n"
               "}");
-        ASSERT_EQUALS("[test.cpp:5]: (error) After insert(), the iterator 'iter' may be invalid.\n", errout.str());
+        ASSERT_EQUALS("[test.cpp:1] -> [test.cpp:3] -> [test.cpp:4] -> [test.cpp:1] -> [test.cpp:5]: (error) Using iterator to local container 'ints' that may be invalid.\n", errout.str());
 
         check("void f()\n"
               "{\n"
@@ -2042,8 +2089,8 @@ private:
               "    std::vector<int>::iterator iter = ints.begin();\n"
               "    ints.insert(iter, 1);\n"
               "    ints.insert(iter, 2);\n"
-              "}");
-        ASSERT_EQUALS("[test.cpp:6]: (error) After insert(), the iterator 'iter' may be invalid.\n", errout.str());
+              "}", true);
+        TODO_ASSERT_EQUALS("[test.cpp:4] -> [test.cpp:5] -> [test.cpp:3] -> [test.cpp:6]: (error) Using iterator to local container 'ints' that may be invalid.\n", "[test.cpp:4] -> [test.cpp:5] -> [test.cpp:3] -> [test.cpp:6]: (error, inconclusive) Using iterator to local container 'ints' that may be invalid.\n", errout.str());
 
         check("void* f(const std::vector<Bar>& bars) {\n"
               "    std::vector<Bar>::iterator i = bars.begin();\n"
@@ -2051,14 +2098,14 @@ private:
               "    void* v = &i->foo;\n"
               "    return v;\n"
               "}");
-        ASSERT_EQUALS("[test.cpp:4]: (error) After insert(), the iterator 'i' may be invalid.\n", errout.str());
+        ASSERT_EQUALS("[test.cpp:1] -> [test.cpp:2] -> [test.cpp:3] -> [test.cpp:1] -> [test.cpp:4]: (error) Using iterator to local container 'bars' that may be invalid.\n", errout.str());
 
         check("Foo f(const std::vector<Bar>& bars) {\n"
               "    std::vector<Bar>::iterator i = bars.begin();\n"
               "    bars.insert(Bar());\n"
               "    return i->foo;\n"
               "}");
-        ASSERT_EQUALS("[test.cpp:4]: (error) After insert(), the iterator 'i' may be invalid.\n", errout.str());
+        ASSERT_EQUALS("[test.cpp:1] -> [test.cpp:2] -> [test.cpp:3] -> [test.cpp:1] -> [test.cpp:4]: (error) Using iterator to local container 'bars' that may be invalid.\n", errout.str());
 
         check("void f(const std::vector<Bar>& bars) {\n"
               "    for(std::vector<Bar>::iterator i = bars.begin(); i != bars.end(); ++i) {\n"
@@ -2073,8 +2120,7 @@ private:
               "        i = bars.insert(i, bar);\n"
               "    }\n"
               "}");
-        ASSERT_EQUALS("[test.cpp:3]: (error) After insert(), the iterator 'i' may be invalid.\n"
-                      "[test.cpp:4]: (error) After insert(), the iterator 'i' may be invalid.\n", errout.str());
+        ASSERT_EQUALS("[test.cpp:1] -> [test.cpp:2] -> [test.cpp:2] -> [test.cpp:3] -> [test.cpp:1] -> [test.cpp:2]: (error) Using iterator to local container 'bars' that may be invalid.\n", errout.str());
 
         check("void* f(const std::vector<Bar>& bars) {\n"
               "    std::vector<Bar>::iterator i = bars.begin();\n"
@@ -2083,7 +2129,7 @@ private:
               "    void* v = &i->foo;\n"
               "    return v;\n"
               "}");
-        ASSERT_EQUALS("[test.cpp:4]: (error) After insert(), the iterator 'i' may be invalid.\n", errout.str());
+        ASSERT_EQUALS("[test.cpp:1] -> [test.cpp:4] -> [test.cpp:1] -> [test.cpp:5] -> [test.cpp:4] -> [test.cpp:1] -> [test.cpp:6]: (error) Using pointer to local variable 'bars' that may be invalid.\n", errout.str());
     }
 
     void insert2() {
@@ -2391,35 +2437,35 @@ private:
               "{\n"
               "    if (s.find(\"abc\")) { }\n"
               "}");
-        ASSERT_EQUALS("[test.cpp:3]: (performance) Inefficient usage of string::find() in condition; string::starts_with() would be faster.\n", errout.str());
+        ASSERT_EQUALS("[test.cpp:3]: (performance) Inefficient usage of string::find() in condition; string::starts_with() could be faster.\n", errout.str());
 
         // error (pointer)
         check("void f(const std::string *s)\n"
               "{\n"
               "    if ((*s).find(\"abc\")) { }\n"
               "}");
-        ASSERT_EQUALS("[test.cpp:3]: (performance) Inefficient usage of string::find() in condition; string::starts_with() would be faster.\n", errout.str());
+        ASSERT_EQUALS("[test.cpp:3]: (performance) Inefficient usage of string::find() in condition; string::starts_with() could be faster.\n", errout.str());
 
         // error (pointer)
         check("void f(const std::string *s)\n"
               "{\n"
               "    if (s->find(\"abc\")) { }\n"
               "}");
-        ASSERT_EQUALS("[test.cpp:3]: (performance) Inefficient usage of string::find() in condition; string::starts_with() would be faster.\n", errout.str());
+        ASSERT_EQUALS("[test.cpp:3]: (performance) Inefficient usage of string::find() in condition; string::starts_with() could be faster.\n", errout.str());
 
         // error (vector)
         check("void f(const std::vector<std::string> &s)\n"
               "{\n"
               "    if (s[0].find(\"abc\")) { }\n"
               "}");
-        ASSERT_EQUALS("[test.cpp:3]: (performance) Inefficient usage of string::find() in condition; string::starts_with() would be faster.\n", errout.str());
+        ASSERT_EQUALS("[test.cpp:3]: (performance) Inefficient usage of string::find() in condition; string::starts_with() could be faster.\n", errout.str());
 
         // #3162
         check("void f(const std::string& s1, const std::string& s2)\n"
               "{\n"
               "    if ((!s1.empty()) && (0 == s1.find(s2))) { }\n"
               "}");
-        ASSERT_EQUALS("[test.cpp:3]: (performance) Inefficient usage of string::find() in condition; string::starts_with() would be faster.\n", errout.str());
+        ASSERT_EQUALS("[test.cpp:3]: (performance) Inefficient usage of string::find() in condition; string::starts_with() could be faster.\n", errout.str());
 
         // #4102
         check("void f(const std::string &define) {\n"
@@ -3844,6 +3890,111 @@ private:
               "}\n",
               true);
         ASSERT_EQUALS("[test.cpp:4]: (style) Consider using std::accumulate algorithm instead of a raw loop.\n", errout.str());
+    }
+
+    void invalidContainer() {
+        check("void f(std::vector<int> &v) {\n"
+              "    auto v0 = v.begin();\n"
+              "    v.push_back(123);\n"
+              "    std::cout << *v0 << std::endl;\n"
+              "}\n",
+              true);
+        ASSERT_EQUALS("[test.cpp:1] -> [test.cpp:2] -> [test.cpp:3] -> [test.cpp:1] -> [test.cpp:4]: (error) Using iterator to local container 'v' that may be invalid.\n", errout.str());
+
+        check("std::string e();\n"
+              "void a() {\n"
+              "  std::vector<std::string> b;\n"
+              "  for (std::vector<std::string>::const_iterator c; c != b.end(); ++c) {\n"
+              "    std::string f = e();\n"
+              "    std::string::const_iterator d = f.begin();\n"
+              "    if (d != f.end()) {}\n"
+              "  }\n"
+              "}\n",
+              true);
+        ASSERT_EQUALS("", errout.str());
+
+        check("void f(std::vector<int> &v) {\n"
+              "    int *v0 = &v[0];\n"
+              "    v.push_back(123);\n"
+              "    std::cout << (*v0)[0] << std::endl;\n"
+              "}\n",
+              true);
+        ASSERT_EQUALS("[test.cpp:1] -> [test.cpp:2] -> [test.cpp:3] -> [test.cpp:1] -> [test.cpp:4]: (error) Using pointer to local variable 'v' that may be invalid.\n", errout.str());
+
+        check("void f() {\n"
+              "    std::vector<int> v = {1};\n"
+              "    int &v0 = v.front();\n"
+              "    v.push_back(123);\n"
+              "    std::cout << v0 << std::endl;\n"
+              "}\n",
+              true);
+        ASSERT_EQUALS(
+            "[test.cpp:3] -> [test.cpp:3] -> [test.cpp:4] -> [test.cpp:5]: (error) Reference to v that may be invalid.\n",
+            errout.str());
+
+        check("void f() {\n"
+              "    std::vector<int> v = {1};\n"
+              "    int &v0 = v[0];\n"
+              "    v.push_back(123);\n"
+              "    std::cout << v0 << std::endl;\n"
+              "}\n",
+              true);
+        ASSERT_EQUALS("[test.cpp:3] -> [test.cpp:4] -> [test.cpp:5]: (error) Reference to v that may be invalid.\n",
+                      errout.str());
+
+        check("void f(std::vector<int> &v) {\n"
+              "    int &v0 = v.front();\n"
+              "    v.push_back(123);\n"
+              "    std::cout << v0 << std::endl;\n"
+              "}\n",
+              true);
+        ASSERT_EQUALS(
+            "[test.cpp:2] -> [test.cpp:2] -> [test.cpp:1] -> [test.cpp:3] -> [test.cpp:4]: (error) Reference to v that may be invalid.\n",
+            errout.str());
+
+        check("void f(std::vector<int> &v) {\n"
+              "    int &v0 = v[0];\n"
+              "    v.push_back(123);\n"
+              "    std::cout << v0 << std::endl;\n"
+              "}\n",
+              true);
+        ASSERT_EQUALS(
+            "[test.cpp:2] -> [test.cpp:1] -> [test.cpp:3] -> [test.cpp:4]: (error) Reference to v that may be invalid.\n",
+            errout.str());
+
+        check("void f(std::vector<int> &v) {\n"
+              "    std::vector<int> *v0 = &v;\n"
+              "    v.push_back(123);\n"
+              "    std::cout << (*v0)[0] << std::endl;\n"
+              "}\n",
+              true);
+        ASSERT_EQUALS("", errout.str());
+
+        check("const std::vector<int> * g(int);\n"
+              "void f() {\n"
+              "    const std::vector<int> *v = g(1);\n"
+              "    if (v && v->size() == 1U) {\n"
+              "        const int &m = v->front();\n"
+              "    }\n"
+              "\n"
+              "    v = g(2);\n"
+              "    if (v && v->size() == 1U) {\n"
+              "        const int &m = v->front();\n"
+              "        if (m == 0) {}\n"
+              "    }\n"
+              "}\n",
+              true);
+        ASSERT_EQUALS("", errout.str());
+
+        check("std::vector<std::string> g();\n"
+              "void f() {\n"
+              "    std::vector<std::string> x = g();\n"
+              "    const std::string& y = x[1];\n"
+              "    std::string z;\n"
+              "    z += \"\";\n"
+              "    z += y;\n"
+              "}\n",true);
+        ASSERT_EQUALS("", errout.str());
     }
 
     void findInsert() {

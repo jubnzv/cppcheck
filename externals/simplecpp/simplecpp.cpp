@@ -45,6 +45,11 @@ static bool isHex(const std::string &s)
     return s.size()>2 && (s.compare(0,2,"0x")==0 || s.compare(0,2,"0X")==0);
 }
 
+static bool isOct(const std::string &s)
+{
+    return s.size()>1 && (s[0]=='0') && (s[1] >= '0') && (s[1] < '8');
+}
+
 
 static const simplecpp::TokenString DEFINE("define");
 static const simplecpp::TokenString UNDEF("undef");
@@ -76,9 +81,12 @@ static long long stringToLL(const std::string &s)
 {
     long long ret;
     const bool hex = isHex(s);
-    std::istringstream istr(hex ? s.substr(2) : s);
+    const bool oct = isOct(s);
+    std::istringstream istr(hex ? s.substr(2) : oct ? s.substr(1) : s);
     if (hex)
         istr >> std::hex;
+    else if (oct)
+        istr >> std::oct;
     istr >> ret;
     return ret;
 }
@@ -87,9 +95,12 @@ static unsigned long long stringToULL(const std::string &s)
 {
     unsigned long long ret;
     const bool hex = isHex(s);
-    std::istringstream istr(hex ? s.substr(2) : s);
+    const bool oct = isOct(s);
+    std::istringstream istr(hex ? s.substr(2) : oct ? s.substr(1) : s);
     if (hex)
         istr >> std::hex;
+    else if (oct)
+        istr >> std::oct;
     istr >> ret;
     return ret;
 }
@@ -745,10 +756,14 @@ void simplecpp::TokenList::combineOperators()
         }
 
         if (tok->op == '.') {
-            if (tok->previous && tok->previous->op == '.')
+            // ellipsis ...
+            if (tok->next && tok->next->op == '.' && tok->next->location.col == (tok->location.col + 1) &&
+                tok->next->next && tok->next->next->op == '.' && tok->next->next->location.col == (tok->location.col + 2)) {
+                tok->setstr("...");
+                deleteToken(tok->next);
+                deleteToken(tok->next);
                 continue;
-            if (tok->next && tok->next->op == '.')
-                continue;
+            }
             // float literals..
             if (tok->previous && tok->previous->number) {
                 tok->setstr(tok->previous->str() + '.');
@@ -765,7 +780,10 @@ void simplecpp::TokenList::combineOperators()
         }
         // match: [0-9.]+E [+-] [0-9]+
         const char lastChar = tok->str()[tok->str().size() - 1];
-        if (tok->number && !isHex(tok->str()) && (lastChar == 'E' || lastChar == 'e') && tok->next && tok->next->isOneOf("+-") && tok->next->next && tok->next->next->number) {
+        if (tok->number && !isOct(tok->str()) &&
+            ((!isHex(tok->str()) && (lastChar == 'E' || lastChar == 'e')) ||
+             (isHex(tok->str()) && (lastChar == 'P' || lastChar == 'p'))) &&
+            tok->next && tok->next->isOneOf("+-") && tok->next->next && tok->next->next->number) {
             tok->setstr(tok->str() + tok->next->op + tok->next->next->str());
             deleteToken(tok->next);
             deleteToken(tok->next);
@@ -826,7 +844,7 @@ void simplecpp::TokenList::combineOperators()
         } else if ((tok->op == '<' || tok->op == '>') && tok->op == tok->next->op) {
             tok->setstr(tok->str() + tok->next->str());
             deleteToken(tok->next);
-            if (tok->next && tok->next->op == '=') {
+            if (tok->next && tok->next->op == '=' && tok->next->next && tok->next->next->op != '=') {
                 tok->setstr(tok->str() + tok->next->str());
                 deleteToken(tok->next);
             }
@@ -1118,12 +1136,20 @@ std::string simplecpp::TokenList::readUntil(std::istream &istr, const Location &
         backslash = false;
         ret += ch;
         if (ch == '\\') {
-            const char next = readChar(istr, bom);
-            if (next == '\r' || next == '\n') {
-                ret.erase(ret.size()-1U);
-                backslash = (next == '\r');
-            }
-            ret += next;
+            bool update_ch = false;
+            char next = 0;
+            do {
+                next = readChar(istr, bom);
+                if (next == '\r' || next == '\n') {
+                    ret.erase(ret.size()-1U);
+                    backslash = (next == '\r');
+                    update_ch = false;
+                } else if (next == '\\')
+                    update_ch = !update_ch;
+                ret += next;
+            } while (next == '\\');
+            if (update_ch)
+                ch = next;
         }
     }
 
@@ -1376,14 +1402,12 @@ namespace simplecpp {
                 args.clear();
                 const Token *argtok = nameTokDef->next->next;
                 while (sameline(nametoken, argtok) && argtok->op != ')') {
-                    if (argtok->op == '.' &&
-                        argtok->next && argtok->next->op == '.' &&
-                        argtok->next->next && argtok->next->next->op == '.' &&
-                        argtok->next->next->next && argtok->next->next->next->op == ')') {
+                    if (argtok->str() == "..." &&
+                        argtok->next && argtok->next->op == ')') {
                         variadic = true;
                         if (!argtok->previous->name)
                             args.push_back("__VA_ARGS__");
-                        argtok = argtok->next->next->next; // goto ')'
+                        argtok = argtok->next; // goto ')'
                         break;
                     }
                     if (argtok->op != ',')
@@ -2484,26 +2508,26 @@ static bool preprocessToken(simplecpp::TokenList &output, const simplecpp::Token
 void simplecpp::preprocess(simplecpp::TokenList &output, const simplecpp::TokenList &rawtokens, std::vector<std::string> &files, std::map<std::string, simplecpp::TokenList *> &filedata, const simplecpp::DUI &dui, simplecpp::OutputList *outputList, std::list<simplecpp::MacroUsage> *macroUsage)
 {
     std::map<std::string, std::size_t> sizeOfType(rawtokens.sizeOfType);
-    sizeOfType.insert(std::pair<std::string, std::size_t>("char", sizeof(char)));
-    sizeOfType.insert(std::pair<std::string, std::size_t>("short", sizeof(short)));
-    sizeOfType.insert(std::pair<std::string, std::size_t>("short int", sizeOfType["short"]));
-    sizeOfType.insert(std::pair<std::string, std::size_t>("int", sizeof(int)));
-    sizeOfType.insert(std::pair<std::string, std::size_t>("long", sizeof(long)));
-    sizeOfType.insert(std::pair<std::string, std::size_t>("long int", sizeOfType["long"]));
-    sizeOfType.insert(std::pair<std::string, std::size_t>("long long", sizeof(long long)));
-    sizeOfType.insert(std::pair<std::string, std::size_t>("float", sizeof(float)));
-    sizeOfType.insert(std::pair<std::string, std::size_t>("double", sizeof(double)));
-    sizeOfType.insert(std::pair<std::string, std::size_t>("long double", sizeof(long double)));
-    sizeOfType.insert(std::pair<std::string, std::size_t>("char *", sizeof(char *)));
-    sizeOfType.insert(std::pair<std::string, std::size_t>("short *", sizeof(short *)));
-    sizeOfType.insert(std::pair<std::string, std::size_t>("short int *", sizeOfType["short *"]));
-    sizeOfType.insert(std::pair<std::string, std::size_t>("int *", sizeof(int *)));
-    sizeOfType.insert(std::pair<std::string, std::size_t>("long *", sizeof(long *)));
-    sizeOfType.insert(std::pair<std::string, std::size_t>("long int *", sizeOfType["long *"]));
-    sizeOfType.insert(std::pair<std::string, std::size_t>("long long *", sizeof(long long *)));
-    sizeOfType.insert(std::pair<std::string, std::size_t>("float *", sizeof(float *)));
-    sizeOfType.insert(std::pair<std::string, std::size_t>("double *", sizeof(double *)));
-    sizeOfType.insert(std::pair<std::string, std::size_t>("long double *", sizeof(long double *)));
+    sizeOfType.insert(std::make_pair("char", sizeof(char)));
+    sizeOfType.insert(std::make_pair("short", sizeof(short)));
+    sizeOfType.insert(std::make_pair("short int", sizeOfType["short"]));
+    sizeOfType.insert(std::make_pair("int", sizeof(int)));
+    sizeOfType.insert(std::make_pair("long", sizeof(long)));
+    sizeOfType.insert(std::make_pair("long int", sizeOfType["long"]));
+    sizeOfType.insert(std::make_pair("long long", sizeof(long long)));
+    sizeOfType.insert(std::make_pair("float", sizeof(float)));
+    sizeOfType.insert(std::make_pair("double", sizeof(double)));
+    sizeOfType.insert(std::make_pair("long double", sizeof(long double)));
+    sizeOfType.insert(std::make_pair("char *", sizeof(char *)));
+    sizeOfType.insert(std::make_pair("short *", sizeof(short *)));
+    sizeOfType.insert(std::make_pair("short int *", sizeOfType["short *"]));
+    sizeOfType.insert(std::make_pair("int *", sizeof(int *)));
+    sizeOfType.insert(std::make_pair("long *", sizeof(long *)));
+    sizeOfType.insert(std::make_pair("long int *", sizeOfType["long *"]));
+    sizeOfType.insert(std::make_pair("long long *", sizeof(long long *)));
+    sizeOfType.insert(std::make_pair("float *", sizeof(float *)));
+    sizeOfType.insert(std::make_pair("double *", sizeof(double *)));
+    sizeOfType.insert(std::make_pair("long double *", sizeof(long double *)));
 
     std::map<TokenString, Macro> macros;
     for (std::list<std::string>::const_iterator it = dui.defines.begin(); it != dui.defines.end(); ++it) {
@@ -2519,9 +2543,9 @@ void simplecpp::preprocess(simplecpp::TokenList &output, const simplecpp::TokenL
         macros.insert(std::pair<TokenString,Macro>(macro.name(), macro));
     }
 
-    macros.insert(std::pair<TokenString,Macro>("__FILE__", Macro("__FILE__", "__FILE__", files)));
-    macros.insert(std::pair<TokenString,Macro>("__LINE__", Macro("__LINE__", "__LINE__", files)));
-    macros.insert(std::pair<TokenString,Macro>("__COUNTER__", Macro("__COUNTER__", "__COUNTER__", files)));
+    macros.insert(std::make_pair("__FILE__", Macro("__FILE__", "__FILE__", files)));
+    macros.insert(std::make_pair("__LINE__", Macro("__LINE__", "__LINE__", files)));
+    macros.insert(std::make_pair("__COUNTER__", Macro("__COUNTER__", "__COUNTER__", files)));
 
     // TRUE => code in current #if block should be kept
     // ELSE_IS_TRUE => code in current #if block should be dropped. the code in the #else should be kept.
@@ -2750,6 +2774,9 @@ void simplecpp::preprocess(simplecpp::TokenList &output, const simplecpp::TokenL
                             output.clear();
                             return;
                         }
+                        if (!tmp)
+                            break;
+                        tok = tmp->previous;
                     }
                     try {
                         conditionIsTrue = (evaluate(expr, sizeOfType) != 0);

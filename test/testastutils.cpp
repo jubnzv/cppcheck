@@ -147,6 +147,10 @@ private:
                           "  int b;\n"
                           "  if (b) { (int)((INTOF(8))result >> b); }\n"
                           "}", "if", "}");
+        // #9235
+        ASSERT_EQUALS(true, isVariableChanged("void f() {\n"
+                                              "    int &a = a;\n"
+                                              "}\n", "= a", "}"));
     }
 
     bool isVariableChangedByFunctionCall(const char code[], const char pattern[], bool *inconclusive) {
@@ -155,7 +159,7 @@ private:
         std::istringstream istr(code);
         tokenizer.tokenize(istr, "test.cpp");
         const Token * const argtok = Token::findmatch(tokenizer.tokens(), pattern);
-        return ::isVariableChangedByFunctionCall(argtok, &settings, inconclusive);
+        return ::isVariableChangedByFunctionCall(argtok, 0, &settings, inconclusive);
     }
 
     void isVariableChangedByFunctionCall() {

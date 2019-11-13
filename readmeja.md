@@ -4,12 +4,6 @@
 |:--:|:--:|:--:|
 | [![Linux ビルド状態](https://img.shields.io/travis/danmar/cppcheck/master.svg?label=Linux%20build)](https://travis-ci.org/danmar/cppcheck) | [![Windows ビルド状態](https://img.shields.io/appveyor/ci/danmar/cppcheck/master.svg?label=Windows%20build)](https://ci.appveyor.com/project/danmar/cppcheck/branch/master) | [![Coverity Scan Build 状態](https://img.shields.io/coverity/scan/512.svg)](https://scan.coverity.com/projects/512) |
 
-## 寄付
-
-Cppcheckが有用であると感じた場合、寄付を検討してください。
-
-[![寄付](http://pledgie.com/campaigns/4127.png)](http://pledgie.com/campaigns/4127)
-
 ## 名前について
 
 このプログラムは元々、"C++check"という名前でしたが後に"Cppcheck"に変更されました。
@@ -37,6 +31,26 @@ GUIも利用する場合、Qtライブラリが必要です。
 * g++ 4.6 (またはそれ以上)
 * clang++
 
+### cmake
+
+cmakeでCppcheckをコンパイルする例
+
+```shell
+mkdir build
+cd build
+cmake ..
+cmake --build .
+```
+
+C++標準を指定する必要がある場合次のオプションを指定します。
+-DCMAKE_CXX_STANDARD=11
+
+CppcheckのGUIが必要な場合次のフラグを指定します。
+-DBUILD_GUI=ON
+
+pcreが必要になりますが、正規表現のルールサポートが必要な場合次のフラグを指定します。
+-DHAVE_RULES=ON
+
 ### qmake
 
 GUIをビルドするには、gui/gui.proファイルが利用できます。
@@ -49,9 +63,9 @@ make
 
 ### Visual Studio
 
-cppcheck.slnファイルが利用できます。このファイルは、Visual Studio 2015向けです。しかし、このプラットフォームツールセットはこれより新しいバージョンまたは古いバージョン向けに変更できます。このソルーションには、プラットフォームターゲットとしてx86とx64があります。
+cppcheck.slnファイルが利用できます。このファイルは、Visual Studio 2019向けです。しかし、このプラットフォームツールセットはこれより新しいバージョンまたは古いバージョン向けに変更できます。このソルーションには、プラットフォームターゲットとしてx86とx64があります。
 
-ルールをコンパイルするためには、"Release-PCRE" または "Debug-PCRE" 設定を選択してください。pcre.lib (または pcre64.lib x64ビルド向け) と pcre.h を /externals にコピーしてください。
+ルールをコンパイルするためには、"Release-PCRE" または "Debug-PCRE" 設定を選択してください。pcre.lib (または pcre64.lib x64ビルド向け) と pcre.h を /externals にコピーしてください。Visual Studio のための PCRE の最新バージョンは [vcpkg](https://github.com/microsoft/vcpkg) から取得できます。
 
 ### Qt Creator + MinGW
 
@@ -69,16 +83,16 @@ make
 推奨するリリースビルド方法:
 
 ```shell
-make SRCDIR=build CFGDIR=cfg HAVE_RULES=yes CXXFLAGS="-O2 -DNDEBUG -Wall -Wno-sign-compare -Wno-unused-function"
+make MATCHCOMPILER=yes FILESDIR=/usr/share/cppcheck HAVE_RULES=yes CXXFLAGS="-O2 -DNDEBUG -Wall -Wno-sign-compare -Wno-unused-function"
 ```
 
 フラグ:
 
-1. `SRCDIR=build`
-cppcheckの最適化にPythonを使用します。
+1. `MATCHCOMPILER=yes`
+cppcheckの最適化にPythonを使用します。Token::Match パターンはコンパイル時にlC++コードに変換されます。
 
-2. `CFGDIR=cfg`
-cppcheckの設定ファイル(.cfg)を置くディレクトリを指定します。
+2. `FILESDIR=/usr/share/cppcheck`
+cppcheckの設定ファイル(addon や cfg や platform)を置くディレクトリを指定します。
 
 3. `HAVE_RULES=yes`
 ルール機能の有効化 (ルール機能には PCRE が必要です)設定です。

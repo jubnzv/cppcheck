@@ -63,7 +63,7 @@ bool CheckCondition::diag(const Token* tok, bool insert)
     return true;
 }
 
-bool CheckCondition::isAliased(const std::set<unsigned int> &vars) const
+bool CheckCondition::isAliased(const std::set<int> &vars) const
 {
     for (const Token *tok = mTokenizer->tokens(); tok; tok = tok->next()) {
         if (Token::Match(tok, "= & %var% ;") && vars.find(tok->tokAt(2)->varId()) != vars.end())
@@ -119,7 +119,7 @@ void CheckCondition::assignIf()
 static bool isParameterChanged(const Token *partok)
 {
     bool addressOf = Token::Match(partok, "[(,] &");
-    unsigned int argumentNumber = 0;
+    int argumentNumber = 0;
     const Token *ftok;
     for (ftok = partok; ftok && ftok->str() != "("; ftok = ftok->previous()) {
         if (ftok->str() == ")")
@@ -145,7 +145,7 @@ static bool isParameterChanged(const Token *partok)
 /** parse scopes recursively */
 bool CheckCondition::assignIfParseScope(const Token * const assignTok,
                                         const Token * const startTok,
-                                        const unsigned int varid,
+                                        const nonneg int varid,
                                         const bool islocal,
                                         const char bitop,
                                         const MathLib::bigint num)
@@ -223,6 +223,8 @@ bool CheckCondition::assignIfParseScope(const Token * const assignTok,
 
 void CheckCondition::assignIfError(const Token *tok1, const Token *tok2, const std::string &condition, bool result)
 {
+    if (tok2 && diag(tok2->tokAt(2)))
+        return;
     std::list<const Token *> locations = { tok1, tok2 };
     reportError(locations,
                 Severity::style,
@@ -490,8 +492,12 @@ void CheckCondition::multiCondition()
             continue;
 
         const Token * const cond1 = scope.classDef->next()->astOperand2();
+        if (!cond1)
+            continue;
 
         const Token * tok2 = scope.classDef->next();
+
+        // Check each 'else if'
         for (;;) {
             tok2 = tok2->link();
             if (!Token::simpleMatch(tok2, ") {"))
@@ -501,23 +507,42 @@ void CheckCondition::multiCondition()
                 break;
             tok2 = tok2->tokAt(4);
 
-            if (cond1 &&
-                tok2->astOperand2() &&
+            if (tok2->astOperand2() &&
                 !cond1->hasKnownIntValue() &&
-                !tok2->astOperand2()->hasKnownIntValue() &&
-                isOverlappingCond(cond1, tok2->astOperand2(), true))
-                multiConditionError(tok2, cond1->linenr());
+                !tok2->astOperand2()->hasKnownIntValue()) {
+                ErrorPath errorPath;
+                if (isOverlappingCond(cond1, tok2->astOperand2(), true))
+                    overlappingElseIfConditionError(tok2, cond1->linenr());
+                else if (isOppositeCond(true, mTokenizer->isCPP(), cond1, tok2->astOperand2(), mSettings->library, true, true, &errorPath))
+                    oppositeElseIfConditionError(cond1, tok2, errorPath);
+            }
         }
     }
 }
 
-void CheckCondition::multiConditionError(const Token *tok, unsigned int line1)
+void CheckCondition::overlappingElseIfConditionError(const Token *tok, nonneg int line1)
 {
+    if (diag(tok))
+        return;
     std::ostringstream errmsg;
     errmsg << "Expression is always false because 'else if' condition matches previous condition at line "
            << line1 << ".";
 
     reportError(tok, Severity::style, "multiCondition", errmsg.str(), CWE398, false);
+}
+
+void CheckCondition::oppositeElseIfConditionError(const Token *ifCond, const Token *elseIfCond, ErrorPath errorPath)
+{
+    if (diag(ifCond) & diag(elseIfCond))
+        return;
+    std::ostringstream errmsg;
+    errmsg << "Expression is always true because 'else if' condition is opposite to previous condition at line "
+           << ifCond->linenr() << ".";
+
+    errorPath.emplace_back(ifCond, "first condition");
+    errorPath.emplace_back(elseIfCond, "else if condition is opposite to first condition");
+
+    reportError(errorPath, Severity::style, "multiCondition", errmsg.str(), CWE398, false);
 }
 
 //---------------------------------------------------------------------------
@@ -571,7 +596,7 @@ void CheckCondition::multiCondition2()
 
         bool nonConstFunctionCall = false;
         bool nonlocal = false; // nonlocal variable used in condition
-        std::set<unsigned int> vars; // variables used in condition
+        std::set<int> vars; // variables used in condition
         visitAstNodes(condTok,
         [&](const Token *cond) {
             if (Token::Match(cond, "%name% (")) {
@@ -685,9 +710,6 @@ void CheckCondition::multiCondition2()
                         }
                     }
                 }
-                if (Token::Match(tok, "%name% ("))
-                    // TODO: This is a bailout to avoid fp
-                    break;
                 if (Token::Match(tok, "%type% (") && nonlocal && isNonConstFunctionCall(tok, mSettings->library)) // non const function call -> bailout if there are nonlocal variables
                     break;
                 if (Token::Match(tok, "case|break|continue|return|throw") && tok->scope() == endToken->scope())
@@ -714,7 +736,7 @@ void CheckCondition::multiCondition2()
                         break;
                     }
                     bool changed = false;
-                    for (unsigned int varid : vars) {
+                    for (int varid : vars) {
                         if (isVariableChanged(tok1, tok2, varid, nonlocal, mSettings, mTokenizer->isCPP())) {
                             changed = true;
                             break;
@@ -1311,11 +1333,28 @@ void CheckCondition::alwaysTrueFalse()
     const SymbolDatabase *symbolDatabase = mTokenizer->getSymbolDatabase();
     for (const Scope * scope : symbolDatabase->functionScopes) {
         for (const Token* tok = scope->bodyStart->next(); tok != scope->bodyEnd; tok = tok->next()) {
-
             if (tok->link()) // don't write false positives when templates are used
                 continue;
             if (!tok->hasKnownIntValue())
                 continue;
+            {
+                // is this a condition..
+                const Token *parent = tok->astParent();
+                while (Token::Match(parent, "%oror%|&&"))
+                    parent = parent->astParent();
+                if (!parent)
+                    continue;
+                const Token *condition = nullptr;
+                if (parent->str() == "?" && precedes(tok, parent))
+                    condition = parent->astOperand1();
+                else if (Token::Match(parent->previous(), "if|while ("))
+                    condition = parent->astOperand2();
+                else if (parent->str() == ";" && parent->astParent() && parent->astParent()->astParent() && Token::simpleMatch(parent->astParent()->astParent()->previous(), "for ("))
+                    condition = parent->astOperand1();
+                else
+                    continue;
+                (void)condition;
+            }
             // Skip already diagnosed values
             if (diag(tok, false))
                 continue;
@@ -1329,41 +1368,13 @@ void CheckCondition::alwaysTrueFalse()
                 continue;
 
             const bool constIfWhileExpression =
-                tok->astParent() && Token::Match(tok->astTop()->astOperand1(), "if|while") &&
+                tok->astParent() && Token::Match(tok->astTop()->astOperand1(), "if|while") && !tok->astTop()->astOperand1()->isConstexpr() &&
                 (Token::Match(tok->astParent(), "%oror%|&&") || Token::Match(tok->astParent()->astOperand1(), "if|while"));
             const bool constValExpr = tok->isNumber() && Token::Match(tok->astParent(),"%oror%|&&|?"); // just one number in boolean expression
             const bool compExpr = Token::Match(tok, "%comp%|!"); // a compare expression
-            const bool returnStatement = Token::simpleMatch(tok->astTop(), "return") &&
-                                         Token::Match(tok->astParent(), "%oror%|&&|return");
+            const bool ternaryExpression = Token::simpleMatch(tok->astParent(), "?");
 
-            if (!(constIfWhileExpression || constValExpr || compExpr || returnStatement))
-                continue;
-
-            if (returnStatement && (!scope->function || !Token::simpleMatch(scope->function->retDef, "bool")))
-                continue;
-
-            if (returnStatement && isConstVarExpression(tok))
-                continue;
-
-            if (returnStatement && Token::simpleMatch(tok->astParent(), "return") && tok->variable() && (
-                    !tok->variable()->isLocal() ||
-                    tok->variable()->isReference() ||
-                    tok->variable()->isConst() ||
-                    !isVariableChanged(tok->variable(), mSettings, mTokenizer->isCPP())))
-                continue;
-
-            // Don't warn in assertions. Condition is often 'always true' by intention.
-            // If platform,defines,etc cause 'always false' then that is not dangerous neither.
-            bool assertFound = false;
-            for (const Token * tok2 = tok->astParent(); tok2 ; tok2 = tok2->astParent()) { // move backwards and try to find "assert"
-                if (tok2->str() == "(" && tok2->astOperand2()) {
-                    const std::string& str = tok2->previous()->str();
-                    if ((str.find("assert")!=std::string::npos || str.find("ASSERT")!=std::string::npos))
-                        assertFound = true;
-                    break;
-                }
-            }
-            if (assertFound)
+            if (!(constIfWhileExpression || constValExpr || compExpr || ternaryExpression))
                 continue;
 
             // Don't warn when there are expanded macros..
@@ -1423,15 +1434,15 @@ void CheckCondition::alwaysTrueFalse()
 
 void CheckCondition::alwaysTrueFalseError(const Token *tok, const ValueFlow::Value *value)
 {
-    const bool condvalue = value && (value->intvalue != 0);
+    const bool alwaysTrue = value && (value->intvalue != 0);
     const std::string expr = tok ? tok->expressionString() : std::string("x");
-    const std::string errmsg = "Condition '" + expr + "' is always " + (condvalue ? "true" : "false");
+    const std::string errmsg = "Condition '" + expr + "' is always " + (alwaysTrue ? "true" : "false");
     const ErrorPath errorPath = getErrorPath(tok, value, errmsg);
     reportError(errorPath,
                 Severity::style,
                 "knownConditionTrueFalse",
                 errmsg,
-                (condvalue ? CWE571 : CWE570), false);
+                (alwaysTrue ? CWE571 : CWE570), false);
 }
 
 void CheckCondition::checkInvalidTestForOverflow()

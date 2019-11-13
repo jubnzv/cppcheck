@@ -1,6 +1,6 @@
 /*
  * Cppcheck - A tool for static C/C++ code analysis
- * Copyright (C) 2007-2018 Cppcheck team.
+ * Copyright (C) 2007-2019 Cppcheck team.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -109,7 +109,7 @@
  * Returns the path of specified type if not empty. Otherwise returns last check
  * path if valid or user's home directory.
  * @param type Type of path to obtain
- * @return Best path fo provided type
+ * @return Best path for provided type
  */
 QString getPath(const QString &type);
 

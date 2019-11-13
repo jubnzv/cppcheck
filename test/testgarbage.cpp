@@ -45,6 +45,8 @@ private:
         settings.experimental = true;
 
         // don't freak out when the syntax is wrong
+
+        TEST_CASE(final_class_x);
         TEST_CASE(wrong_syntax1);
         TEST_CASE(wrong_syntax2);
         TEST_CASE(wrong_syntax3); // #3544
@@ -64,7 +66,6 @@ private:
         TEST_CASE(garbageCode10); // #6127
         TEST_CASE(garbageCode12);
         TEST_CASE(garbageCode13); // #2607
-        TEST_CASE(garbageCode14); // #5595
         TEST_CASE(garbageCode15); // #5203
         TEST_CASE(garbageCode16);
         TEST_CASE(garbageCode17);
@@ -152,7 +153,7 @@ private:
         TEST_CASE(garbageCode110);
         TEST_CASE(garbageCode111);
         TEST_CASE(garbageCode112);
-        TEST_CASE(garbageCode114);
+        TEST_CASE(garbageCode114); // #2118
         TEST_CASE(garbageCode115); // #5506
         TEST_CASE(garbageCode116); // #5356
         TEST_CASE(garbageCode117); // #6121
@@ -235,6 +236,8 @@ private:
         TEST_CASE(garbageCode202); // #8907
         TEST_CASE(garbageCode203); // #8972
         TEST_CASE(garbageCode204);
+        TEST_CASE(garbageCode205);
+        TEST_CASE(garbageCode206);
 
         TEST_CASE(garbageCodeFuzzerClientMode1); // test cases created with the fuzzer client, mode 1
 
@@ -281,7 +284,7 @@ private:
 
         tokenizer.simplifyTokenList2();
 
-        return tokenizer.tokens()->stringifyList(false, false, false, true, false, 0, 0);
+        return tokenizer.tokens()->stringifyList(false, false, false, true, false, nullptr, nullptr);
     }
 
     std::string getSyntaxError(const char code[]) {
@@ -297,10 +300,24 @@ private:
         return "";
     }
 
+
+    void final_class_x() {
+
+        const char code[] = "class __declspec(dllexport) x final { };";
+        {
+            errout.str("");
+            Tokenizer tokenizer(&settings, this);
+            std::istringstream istr(code);
+            tokenizer.tokenize(istr, "test.cpp");
+            tokenizer.simplifyTokenList2();
+            ASSERT_EQUALS("", errout.str());
+        }
+    }
+
     void wrong_syntax1() {
         {
             const char code[] ="TR(kvmpio, PROTO(int rw), ARGS(rw), TP_(aa->rw;))";
-            ASSERT_EQUALS("TR ( kvmpio , PROTO ( int rw ) , ARGS ( rw ) , TP_ ( aa . rw ; ) )", checkCode(code));
+            ASSERT_THROW(checkCode(code), InternalError);
             ASSERT_EQUALS("", errout.str());
         }
 
@@ -326,6 +343,7 @@ private:
         // don't segfault..
         ASSERT_THROW(checkCode(code), InternalError);
     }
+
 
     void wrong_syntax3() {   // #3544
         const char code[] = "X #define\n"
@@ -466,10 +484,6 @@ private:
 
     void garbageCode13() {
         checkCode("struct C {} {} x");
-    }
-
-    void garbageCode14() {
-        checkCode("static f() { int i; int source[1] = { 1 }; for (i = 0; i < 4; i++) (u, if (y u.x e)) }"); // Garbage code
     }
 
     void garbageCode15() { // Ticket #5203
@@ -841,9 +855,9 @@ private:
 
     void garbageCode101() { // #6835
         // Reported case
-        checkCode("template < class , =( , int) X = 1 > struct A { } ( ) { = } [ { } ] ( ) { A < void > 0 }");
+        ASSERT_THROW(checkCode("template < class , =( , int) X = 1 > struct A { } ( ) { = } [ { } ] ( ) { A < void > 0 }"), InternalError);
         // Reduced case
-        checkCode("template < class =( , ) X = 1> struct A {}; A<void> a;");
+        ASSERT_THROW(checkCode("template < class =( , ) X = 1> struct A {}; A<void> a;"), InternalError);
     }
 
     void garbageCode102() { // #6846
@@ -891,10 +905,10 @@ private:
     }
 
     void garbageCode114() { // #2118
-        ASSERT_THROW(checkCode("Q_GLOBAL_STATIC_WITH_INITIALIZER(Qt4NodeStaticData, qt4NodeStaticData, {\n"
-                               "    for (unsigned i = 0 ; i < count; i++) {\n"
-                               "    }\n"
-                               "});"), InternalError);
+        checkCode("Q_GLOBAL_STATIC_WITH_INITIALIZER(Qt4NodeStaticData, qt4NodeStaticData, {\n"
+                  "    for (unsigned i = 0 ; i < count; i++) {\n"
+                  "    }\n"
+                  "});");
     }
 
     void garbageCode115() { // #5506
@@ -1257,10 +1271,6 @@ private:
                            "}\n";
         ASSERT_THROW(checkCode(code), InternalError);
 
-        // #6106
-        code = " f { int i ; b2 , [ ] ( for ( i = 0 ; ; ) ) }";
-        checkCode(code);
-
         // 6122 survive garbage code
         code = "; { int i ; for ( i = 0 ; = 123 ; ) - ; }";
         ASSERT_THROW(checkCode(code), InternalError);
@@ -1416,7 +1426,7 @@ private:
 
     void garbageCode170() {
         // 7255
-        checkCode("d i(){{f*s=typeid(()0,)}}", false);
+        ASSERT_THROW(checkCode("d i(){{f*s=typeid(()0,)}}", false), InternalError);
     }
 
     void garbageCode171() {
@@ -1536,7 +1546,7 @@ private:
         ASSERT_THROW(checkCode("{((()))(return 1||);}"), InternalError);
     }
 
-    // #8709 - no garbarge but to avoid stability regression
+    // #8709 - no garbage but to avoid stability regression
     void garbageCode195() {
         checkCode("a b;\n"
                   "void c() {\n"
@@ -1591,11 +1601,38 @@ private:
     void garbageCode203() { // #8972
         checkCode("{ > () {} }");
         checkCode("template <> a > ::b();");
-        ASSERT_THROW(checkCode("{ template <a> class b { } template <> template <c> c() b<a>::e() { } template b<d>; }"), InternalError);
     }
 
     void garbageCode204() {
-        checkCode("template <a, = b<>()> c; template <a> a as() {} as<c<>>();");
+        ASSERT_THROW(checkCode("template <a, = b<>()> c; template <a> a as() {} as<c<>>();"), InternalError);
+    }
+
+    void garbageCode205() {
+        checkCode("class CodeSnippetsEvent : public wxCommandEvent {\n"
+                  "public :\n"
+                  "    CodeSnippetsEvent ( wxEventType commandType =  wxEventType , int id = 0 ) ;\n"
+                  "    CodeSnippetsEvent ( const CodeSnippetsEvent & event ) ;\n"
+                  "virtual wxEvent * Clone ( ) const { return new CodeSnippetsEvent ( * this ) ; }\n"
+                  "private :\n"
+                  "    int m_SnippetID ;\n"
+                  "} ;\n"
+                  "const  wxEventType wxEVT_CODESNIPPETS_GETFILELINKS  =  wxNewEventType  (  )\n"
+                  "CodeSnippetsEvent :: CodeSnippetsEvent ( wxEventType commandType , int id )\n"
+                  ": wxCommandEvent ( commandType , id ) {\n"
+                  "}\n"
+                  "CodeSnippetsEvent :: CodeSnippetsEvent ( const CodeSnippetsEvent & Event )\n"
+                  ": wxCommandEvent ( Event )\n"
+                  ", m_SnippetID ( 0 ) {\n"
+                  "}"); // don't crash
+    }
+
+    void garbageCode206() {
+        {
+            ASSERT_EQUALS("[test.cpp:1] syntax error", getSyntaxError("void foo() { for (auto operator new : int); }"));
+        }
+        {
+            ASSERT_EQUALS("[test.cpp:1] syntax error", getSyntaxError("void foo() { for (a operator== :) }"));
+        }
     }
 
     void syntaxErrorFirstToken() {

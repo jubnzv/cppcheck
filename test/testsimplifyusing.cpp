@@ -64,6 +64,10 @@ private:
         TEST_CASE(simplifyUsing8976);
         TEST_CASE(simplifyUsing9040);
         TEST_CASE(simplifyUsing9042);
+        TEST_CASE(simplifyUsing9191);
+        TEST_CASE(simplifyUsing9381);
+        TEST_CASE(simplifyUsing9385);
+        TEST_CASE(simplifyUsing9388);
     }
 
     std::string tok(const char code[], bool simplify = true, Settings::PlatformType type = Settings::Native, bool debugwarnings = true) {
@@ -80,7 +84,7 @@ private:
         if (simplify)
             tokenizer.simplifyTokenList2();
 
-        return tokenizer.tokens()->stringifyList(0, !simplify);
+        return tokenizer.tokens()->stringifyList(nullptr, !simplify);
     }
 
     void simplifyUsing1() {
@@ -492,6 +496,127 @@ private:
                            "} ;";
 
         ASSERT_EQUALS(exp, tok(code, true, Settings::Win64));
+    }
+
+    void simplifyUsing9191() {
+        const char code[] = "namespace NS1 {\n"
+                            "  namespace NS2 {\n"
+                            "    using _LONG = signed long long;\n"
+                            "  }\n"
+                            "}\n"
+                            "void f1() {\n"
+                            "  using namespace NS1;\n"
+                            "  NS2::_LONG A;\n"
+                            "}\n"
+                            "void f2() {\n"
+                            "  using namespace NS1::NS2;\n"
+                            "  _LONG A;\n"
+                            "}";
+
+        const char exp[] = "namespace NS1 { "
+                           "} "
+                           "void f1 ( ) { "
+                           "using namespace NS1 ; "
+                           "signed long long A ; "
+                           "} "
+                           "void f2 ( ) { "
+                           "using namespace NS1 :: NS2 ; "
+                           "signed long long A ; "
+                           "}";
+
+        ASSERT_EQUALS(exp, tok(code, false));
+    }
+
+    void simplifyUsing9381() {
+        const char code[] = "namespace ns {\n"
+                            "    class Result;\n"
+                            "    using UniqueResultPtr = std::unique_ptr<Result>;\n"
+                            "    class A {\n"
+                            "    public:\n"
+                            "        void func(UniqueResultPtr);\n"
+                            "    };\n"
+                            "    void A::func(UniqueResultPtr) {\n"
+                            "    }\n"
+                            "}";
+        const char exp[] = "namespace ns { "
+                           "class Result ; "
+                           "class A { "
+                           "public: "
+                           "void func ( std :: unique_ptr < Result > ) ; "
+                           "} ; "
+                           "void A :: func ( std :: unique_ptr < Result > ) { "
+                           "} "
+                           "}";
+
+        ASSERT_EQUALS(exp, tok(code, false));
+    }
+
+    void simplifyUsing9385() {
+        {
+            const char code[] = "class A {\n"
+                                "public:\n"
+                                "    using Foo = int;\n"
+                                "    A(Foo foo);\n"
+                                "    ~A();\n"
+                                "    void func(Foo foo);\n"
+                                "};\n"
+                                "A::A(Foo) { }\n"
+                                "A::~A() { Foo foo; }\n"
+                                "void A::func(Foo) { }";
+            const char exp[] = "class A { "
+                               "public: "
+                               "A ( int foo ) ; "
+                               "~ A ( ) ; "
+                               "void func ( int foo ) ; "
+                               "} ; "
+                               "A :: A ( int ) { } "
+                               "A :: ~ A ( ) { int foo ; } "
+                               "void A :: func ( int ) { }";
+            ASSERT_EQUALS(exp, tok(code, false));
+        }
+        {
+            const char code[] = "class A {\n"
+                                "public:\n"
+                                "    struct B {\n"
+                                "        using Foo = int;\n"
+                                "        B(Foo foo);\n"
+                                "        ~B();\n"
+                                "        void func(Foo foo);\n"
+                                "    };\n"
+                                "};\n"
+                                "A::B::B(Foo) { }\n"
+                                "A::B::~B() { Foo foo; }\n"
+                                "void A::B::func(Foo) { }";
+            const char exp[] = "class A { "
+                               "public: "
+                               "struct B { "
+                               "B ( int foo ) ; "
+                               "~ B ( ) ; "
+                               "void func ( int foo ) ; "
+                               "} ; "
+                               "} ; "
+                               "A :: B :: B ( int ) { } "
+                               "A :: B :: ~ B ( ) { int foo ; } "
+                               "void A :: B :: func ( int ) { }";
+            ASSERT_EQUALS(exp, tok(code, false));
+        }
+    }
+
+    void simplifyUsing9388() {
+        const char code[] = "class A {\n"
+                            "public:\n"
+                            "    using Type = int;\n"
+                            "    A(Type&);\n"
+                            "    Type& t_;\n"
+                            "};\n"
+                            "A::A(Type& t) : t_(t) { }";
+        const char exp[] = "class A { "
+                           "public: "
+                           "A ( int & ) ; "
+                           "int & t_ ; "
+                           "} ; "
+                           "A :: A ( int & t ) : t_ ( t ) { }";
+        ASSERT_EQUALS(exp, tok(code, false));
     }
 
 };

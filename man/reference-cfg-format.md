@@ -1,6 +1,6 @@
 ---
 title: Cppcheck .cfg format
-subtitle: Version 1.88
+subtitle: Version 1.90 dev
 author: Cppcheck team
 lang: en
 toc: true
@@ -15,7 +15,7 @@ This is a reference for the .cfg file format that Cppcheck uses.
 
 Cppcheck has configurable checking for leaks, e.g. you can specify which functions allocate and free memory or resources and which functions do not affect the allocation at all.
 
-## `<alloc>` and `<dealloc>`
+## `<alloc>`, `<realloc>` and `<dealloc>`
 
 Here is an example program:
 
@@ -42,6 +42,17 @@ Here is a minimal windows.cfg file:
       <resource>
         <alloc>CreatePen</alloc>
         <dealloc>DeleteObject</dealloc>
+      </resource>
+    </def>
+
+Functions that reallocate memory can be configured using a `<realloc>` tag. The input argument which points to the memory that shall be reallocated can also be configured (the default is the first argument). As an example, here is a configuration file for the fopen, freopen and fclose functions from the c standard library:
+
+    <?xml version="1.0"?>
+    <def>
+      <resource>
+        <alloc>fopen</alloc>
+        <realloc realloc-arg="3">freopen</realloc>
+        <dealloc>fclose</dealloc>
       </resource>
     </def>
 
@@ -88,6 +99,8 @@ To specify the behaviour of functions and how they should be used, `<function>` 
 ## Function arguments
 
 The arguments a function takes can be specified by `<arg>` tags. Each of them takes the number of the argument (starting from 1) in the nr attribute, `nr="any"` for arbitrary arguments, or `nr="variadic"` for variadic arguments. Optional arguments can be specified by providing a default value: `default="value"`. The specifications for individual arguments override this setting.
+
+You can specify if an argument is an input or output argument. For example `<arg nr="1" direction="in">`. The allowed directions are `in`, `out` and `inout`.
 
 ### Not bool
 
@@ -158,6 +171,10 @@ Here is the minimal windows.cfg:
         <arg nr="3"/>
       </function>
     </def>
+
+The `indirect` attribute can be set to control the indirection of uninitialized memory allowed. Setting `indirect` to `0` means no uninitialized memory is allowed. Setting it to `1` allows a pointer to uninitialized memory. Setting it to `2` allows a pointer to pointer to uninitialized memory.
+
+By default, cppcheck will use an indirect value of `0` unless `not-null` is used. When `not-null` is used, then `indirect` will default to `1`. 
 
 ### Null pointers
 
@@ -537,3 +554,8 @@ The tag `<type>` can be added as well to provide more information about the type
 
 * `string='std-like'` can be set for containers that match `std::string` interfaces.
 * `associative='std-like'` can be set for containers that match C++'s `AssociativeContainer` interfaces.
+
+# `<smart-pointer>`
+
+Specify that a class is a smart pointer by using `<smart-pointer class-name"std::shared_ptr"/>`.
+
