@@ -33,6 +33,51 @@ void api01()
 
 void dostuff(int *data);
 
+enum enum_dcl04 { a = 0, b = 8, c = 9 };
+static int var1_dc104 = 42;
+static int var2_dc104, var3_dc104 = 34; // cert-DCL04-C
+int dc104_fn()
+{
+  int v0 = 0, v1; // cert-DCL04-C
+  int v2, v3 = 0; // cert-DCL04-C
+  int v4; int v5 = 0; // cert-DCL04-C
+  int v6, v7, v8 = 0; // cert-DCL04-C
+  int v9 = 0;
+  char v10;
+
+  int v11 = 0, *p0; // cert-DCL04-C
+  int v12, *p1; // cert-DCL04-C
+  int *p2, *p3; // cert-DCL04-C
+  int *p4, *ap0[3]; // cert-DCL04-C
+  int v13, *p5 = NULL; // cert-DCL04-C
+  int v14 = 4, *p6; // cert-DCL04-C
+  int *p7; int *p8; // cert-DCL04-C
+  int *p9 = NULL; int *p10; // cert-DCL04-C
+  int *p11;
+  int *p12 = NULL;
+
+  int a0[4], *p13; // cert-DCL04-C
+  int a1, a2[4]; // cert-DCL04-C
+  int a3[3], a4[3]; // cert-DCL04-C
+  int a4[3];
+  int a5[3][3], a6[1]; // cert-DCL04-C
+  int a7[3][3], *p14; // cert-DCL04-C
+  int a8[3][3], v15; // cert-DCL04-C
+  int a9[2] = {0x55, 0xAA};
+
+  // No warning: DCL04-C-EX1
+  for (size_t i = 0, j = 1; ; ++i, j <<= 1)
+  {}
+  for (
+    size_t i = 0, j = 1; i < 42; ++i) {}
+
+  // No warning: DCL04-C-EX2
+  int i1, i2, i3;
+  int i1,
+      i2, i3;
+  int i1; int i2;
+}
+
 void exp05()
 {
     const int x = 42;

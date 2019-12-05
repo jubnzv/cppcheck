@@ -96,6 +96,47 @@ def isFunctionCall(token, function_names, number_of_arguments=None):
     return len(cppcheckdata.getArguments(token)) == number_of_arguments
 
 
+# DCL04-C
+# Do not declare more than one variable per declaration
+def dcl04(data):
+    name_tokens = [v.nameToken for v in data.variables if v.nameToken]
+    for _, decl_tokens in itertools.groupby(name_tokens, key=lambda t:t.linenr):
+        decl_tokens = list(decl_tokens)
+        if len(decl_tokens) == 1:
+            continue
+
+        #  DCL04-C-EX1: Multiple loop control variables can be declared in the
+        #  same for statement.
+        ts = decl_tokens[0]
+        found = False
+        while ts:
+            if ts.str == '(' and ts.previous and ts.previous.str == 'for':
+                found = True
+                break
+            if ts == ';':
+                break
+            ts = ts.previous
+        if found:
+            continue
+
+        # DCL04-C-EX2: Multiple, simple variable declarations can be
+        # declared on the same line given that there are no
+        # initializations. A simple variable declaration is one that is not
+        # a pointer or array.
+        reported = False
+        for t in decl_tokens:
+            if t.variable.isPointer or t.variable.isArray:
+                reported = True
+                break
+            if t.next and t.next.isAssignmentOp:
+                reported = True
+                break
+
+        if reported:
+            for t in decl_tokens:
+                reportError(t, 'style', "Do not declare more than one variable per declaration", 'DCL04-C')
+
+
 # EXP05-C
 # do not attempt to cast away const
 def exp05(data):
@@ -414,6 +455,7 @@ if __name__ == '__main__':
         for cfg in data.configurations:
             if (len(data.configurations) > 1) and (not args.quiet):
                 print('Checking %s, config %s...' % (dumpfile, cfg.name))
+            dcl04(cfg)
             exp05(cfg)
             exp42(cfg)
             exp46(cfg)
