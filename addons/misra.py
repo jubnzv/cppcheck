@@ -2625,12 +2625,19 @@ class MisraChecker:
         """
         ruleIsSuppressed = False
 
-        # Remove any prefix listed in command arguments from the filename.
-        filename = None
+        basename = None
+        filename = file_path
         if file_path is not None:
-            # file path should be the same as in addSuppressedRule
-            filename = os.path.expanduser(file_path)
-            filename = os.path.normpath(filename)
+            # Remove file prefix listed in command arguments from the filename.
+            if self.filePrefix is not None:
+                filename = remove_file_prefix(file_path, self.filePrefix)
+            else:
+                # Handle base name syntax in suppressed rules. If the file with
+                # the specified path is not available, we will suppress this
+                # rule for all files that match the given base name.
+                basename = os.path.basename(file_path)
+                if not os.path.isfile(file_path):
+                    filename = basename
 
         if ruleNum in self.suppressedRules:
             fileDict = self.suppressedRules[ruleNum]
@@ -2640,24 +2647,30 @@ class MisraChecker:
             if None in fileDict:
                 ruleIsSuppressed = True
             else:
-                # Does the filename match one of the names in
-                # the file list
+                ruleItemList = None
+                # Check that file name with full path match one of the names
+                # in the file list.
                 if filename in fileDict:
-                    # Get the list of ruleItems
                     ruleItemList = fileDict[filename]
+                # Try to fallback to base name.
+                elif basename in fileDict:
+                    ruleItemList = fileDict[basename]
+                # No relevant suppressions found.
+                else:
+                    return False
 
-                    if None in ruleItemList:
-                        # Entry of None in the ruleItemList means the rule is
-                        # suppressed for all lines in the filename
-                        ruleIsSuppressed = True
-                    else:
-                        # Iterate though the the list of line numbers
-                        # and symbols looking for a match of the line
-                        # number.  Matching the symbol is a TODO:
-                        for each in ruleItemList:
-                            if each is not None:
-                                if each[0] == linenr:
-                                    ruleIsSuppressed = True
+                if None in ruleItemList:
+                    # Entry of None in the ruleItemList means the rule is
+                    # suppressed for all lines in the filename.
+                    ruleIsSuppressed = True
+                else:
+                    # Iterate though the the list of line numbers and symbols
+                    # looking for a match of the line number. Matching the
+                    # symbol is a TODO.
+                    for each in ruleItemList:
+                        if each is not None:
+                            if each[0] == linenr:
+                                ruleIsSuppressed = True
 
         return ruleIsSuppressed
 

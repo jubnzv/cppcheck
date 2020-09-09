@@ -121,6 +121,27 @@ def test_rules_suppression(checker, capsys):
         dump_remove(src)
 
 
+def test_rules_suppression_subfolder(checker, capsys):
+    # With this test we show that the rules can be suppressed by the relative
+    # path. Suppressions file (addons/test/misra/suppressions.txt) has the
+    # following line:
+    #
+    # MISRA.16.6:addons/test/misra/misra-suppressions1-test.c
+    #
+    # This means that rule 16.6 should be suppressed only for
+    # addons/test/misra/misra-suppressions1-test.c, but not for
+    # addons/test/misra/test_ext/misra-suppressions1-test.c.
+    src = "addons/test/misra/test_ext/misra-suppressions1-test.c"
+    re_suppressed = r"\[%s\:[0-9]+\].*\[misra-c2012-16.6\]" % src
+    dump_remove(src)
+    dump_create(src, "--suppressions-list=addons/test/misra/suppressions.txt")
+    checker.parseDump(src + ".dump")
+    captured = capsys.readouterr().err
+    found = re.search(re_suppressed, captured)
+    assert(found)
+    dump_remove(src)
+
+
 def test_arguments_regression():
     args_ok = ["-generate-table",
                "--rule-texts=./addons/test/assets/misra_rules_multiple_lines.txt",
